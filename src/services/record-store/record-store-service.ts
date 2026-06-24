@@ -395,7 +395,7 @@ export class RecordStoreService {
   }
 
   /** Read every submitted record (used for dedup + export). */
-  async listSubmittedRecords(): Promise<EvalRecord[]> {
+  listSubmittedRecords(): Promise<EvalRecord[]> {
     return this.readAll(this.submittedDir);
   }
 

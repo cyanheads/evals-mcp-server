@@ -217,14 +217,13 @@ export async function runSubmitGate(
   if (!isLlmRubric) {
     for (const ev of record.verification.evidence) {
       if (ev.type === 'deterministic_check' && ev.computed !== undefined) {
-        const agrees = gradeCandidate(record.grader, ev.computed, record.gold, record.choices).pass;
-        if (!agrees || ev.passed === false) {
-          const computedResult = gradeCandidate(
-            record.grader,
-            ev.computed,
-            record.gold,
-            record.choices,
-          );
+        const computedResult = gradeCandidate(
+          record.grader,
+          ev.computed,
+          record.gold,
+          record.choices,
+        );
+        if (!computedResult.pass || ev.passed === false) {
           return {
             ok: false,
             failure: {
