@@ -17,6 +17,7 @@ import {
   conflict,
   notFound,
   serializationError,
+  serviceUnavailable,
   validationError,
 } from '@cyanheads/mcp-ts-core/errors';
 import { nanoid } from 'nanoid';
@@ -34,6 +35,40 @@ export interface PatchChange {
   before?: unknown;
   op: 'set' | 'append' | 'unset';
   path: string;
+}
+
+/**
+ * Run a filesystem operation, converting any raw Node `ErrnoException` (EACCES,
+ * EISDIR, ENOSPC, EROFS, EIO, …) into a clean typed domain error. The raw fs
+ * error embeds the absolute on-disk path in its `message` — and the framework
+ * forwards a thrown error's `message` verbatim to the client — so it must never
+ * reach the wire. The clean error carries only the safe errno `code` (e.g.
+ * "EACCES", no path) and a recovery hint; the original error rides as `cause`
+ * for server-side logs/OTel and is never serialized to the client.
+ *
+ * ENOENT is the one expected, non-leaking outcome the store handles as control
+ * flow (a missing file/dir is "not found", not an I/O failure), so it is
+ * re-thrown unchanged for the caller to interpret.
+ */
+async function tryFs<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') throw err;
+    throw serviceUnavailable(
+      'The eval record store could not complete a disk operation.',
+      {
+        reason: 'storage_unavailable',
+        operation,
+        ...(code ? { code } : {}),
+        recovery: {
+          hint: 'Check that EVALS_DATA_DIR exists and is readable/writable, then retry.',
+        },
+      },
+      { cause: err },
+    );
+  }
 }
 
 /** Fields the store regards as semantic for `content_hash` (dedup key). */
@@ -83,9 +118,11 @@ export class RecordStoreService {
 
   /** Create the on-disk tree. Called once at startup. */
   async init(): Promise<void> {
-    await mkdir(this.draftsDir, { recursive: true });
-    await mkdir(this.submittedDir, { recursive: true });
-    await mkdir(this.exportsDir, { recursive: true });
+    await tryFs('init', async () => {
+      await mkdir(this.draftsDir, { recursive: true });
+      await mkdir(this.submittedDir, { recursive: true });
+      await mkdir(this.exportsDir, { recursive: true });
+    });
   }
 
   // ---- identity & integrity helpers --------------------------------------
@@ -132,9 +169,11 @@ export class RecordStoreService {
 
   private async writeAtomic(path: string, data: string): Promise<void> {
     const tmp = `${path}.${nanoid(6)}.tmp`;
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(tmp, data, 'utf8');
-    await rename(tmp, path);
+    await tryFs('write', async () => {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(tmp, data, 'utf8');
+      await rename(tmp, path);
+    });
   }
 
   // ---- CRUD --------------------------------------------------------------
@@ -171,7 +210,7 @@ export class RecordStoreService {
 
   private async readFileOrNull(path: string): Promise<string | null> {
     try {
-      return await readFile(path, 'utf8');
+      return await tryFs('read', () => readFile(path, 'utf8'));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw err;
@@ -203,7 +242,7 @@ export class RecordStoreService {
     if (draft === null) {
       throw notFound(`No draft with id "${id}" to discard.`, { reason: 'not_found', id });
     }
-    await unlink(draftPath);
+    await tryFs('delete', () => unlink(draftPath));
     ctx.log.info('Discarded draft', { id });
   }
 
@@ -373,8 +412,10 @@ export class RecordStoreService {
 
     const submittedPath = this.pathFor('submitted', frozen.id);
     await this.writeAtomic(submittedPath, `${JSON.stringify(frozen, null, 2)}\n`);
-    // Remove the draft only after the submitted file is durably written.
-    await unlink(this.pathFor('draft', frozen.id)).catch((err) => {
+    // Remove the draft only after the submitted file is durably written. A missing
+    // draft (ENOENT) is fine — it may already be gone; tryFs re-throws ENOENT, which
+    // we swallow here, while a real I/O failure surfaces as the clean storage error.
+    await tryFs('delete', () => unlink(this.pathFor('draft', frozen.id))).catch((err) => {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     });
     ctx.log.notice('Promoted draft to submitted', { id: frozen.id, checksum: frozen.checksum });
@@ -386,7 +427,7 @@ export class RecordStoreService {
   private async listIds(dir: string): Promise<string[]> {
     let entries: string[];
     try {
-      entries = await readdir(dir);
+      entries = await tryFs('list', () => readdir(dir));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;

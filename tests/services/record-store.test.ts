@@ -343,6 +343,83 @@ describe('RecordStoreService — listSummaries', () => {
   });
 });
 
+describe('RecordStoreService — fs errors never leak internal paths', () => {
+  /** Assert a thrown value carries no absolute path, stack frame, or temp-file artifact. */
+  function assertLeakFree(err: { code?: unknown; data?: unknown; message: string }): void {
+    const surfaces = [err.message, JSON.stringify(err.data ?? {})];
+    for (const s of surfaces) {
+      // No absolute filesystem paths (POSIX "/…" or Windows "C:\…").
+      expect(s).not.toMatch(/(^|[\s"'(])\/[A-Za-z0-9._-]+\//);
+      expect(s).not.toMatch(/[A-Za-z]:\\/);
+      // No stack frames or atomic-write temp suffixes.
+      expect(s).not.toMatch(/\bat\s+.+\(.+:\d+:\d+\)/);
+      expect(s).not.toContain('.tmp');
+      // No raw OS dir names the store builds paths from.
+      expect(s).not.toContain('drafts/');
+      expect(s).not.toContain('submitted/');
+    }
+  }
+
+  it('a write failure (ENOTDIR — a file occupies the data-dir slot) surfaces a clean storage error', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'evals-leak-'));
+    // Put a regular file where the store expects its data directory, so mkdir/writeFile
+    // under it fail with ENOTDIR — a non-ENOENT raw fs error that embeds the path.
+    const filePath = join(base, 'blocker');
+    await writeFile(filePath, 'x', 'utf8');
+    const store = new RecordStoreService(filePath, undefined);
+
+    const err = await store.init().catch(
+      (e) =>
+        e as {
+          code?: unknown;
+          data: { reason: string; code?: string; recovery?: { hint?: string } };
+          message: string;
+        },
+    );
+    expect(err.data.reason).toBe('storage_unavailable');
+    // The errno class is surfaced (actionable, path-free); the path is not.
+    expect(err.message).not.toContain(base);
+    expect(err.data.recovery?.hint).toContain('EVALS_DATA_DIR');
+    assertLeakFree(err);
+
+    await rm(base, { recursive: true, force: true });
+  });
+
+  it('the raw fs error is preserved server-side as `cause` (never serialized to the client)', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'evals-leak-'));
+    const filePath = join(base, 'blocker');
+    await writeFile(filePath, 'x', 'utf8');
+    const store = new RecordStoreService(filePath, undefined);
+
+    const err = (await store.init().catch((e) => e)) as Error & {
+      cause?: NodeJS.ErrnoException;
+      data?: unknown;
+    };
+    // cause carries the original errno for logs/OTel...
+    expect(err.cause?.code).toBeDefined();
+    // ...but the client-facing data does not carry the raw cause message/path.
+    expect(JSON.stringify(err.data)).not.toContain((err.cause as Error)?.message ?? '__none__');
+
+    await rm(base, { recursive: true, force: true });
+  });
+
+  it('a read failure on a non-ENOENT error (EISDIR — a directory where a record file is expected) is clean', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'evals-leak-'));
+    const store = new RecordStoreService(dir, undefined);
+    await store.init();
+    // Create a *directory* named like a record file, so readFile hits EISDIR, not ENOENT.
+    await mkdir(join(dir, 'drafts', 'ev_isadir00000.json'), { recursive: true });
+
+    const err = await store
+      .read('ev_isadir00000')
+      .catch((e) => e as { data: { reason: string }; message: string });
+    expect(err.data.reason).toBe('storage_unavailable');
+    assertLeakFree(err);
+
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
 describe('RecordStoreService — resolveCapture', () => {
   it('returns null when EVALS_CAPTURE_DIR is unset (capture disabled)', async () => {
     const store = new RecordStoreService('/tmp/unused-cap', undefined);
