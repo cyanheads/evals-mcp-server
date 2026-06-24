@@ -1,19 +1,20 @@
 {
   "name": "evals-mcp-server",
   "version": "0.1.0",
-  "description": "",
+  "description": "Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval.",
   "author": {
-    "name": ""
+    "name": "cyanheads"
   },
-  "homepage": "",
-  "repository": "",
+  "homepage": "https://github.com/cyanheads/evals-mcp-server",
+  "repository": "https://github.com/cyanheads/evals-mcp-server",
   "license": "Apache-2.0",
   "mcpServers": {
     "evals-mcp-server": {
       "command": "npx",
       "args": ["-y", "evals-mcp-server"],
       "env": {
-        "MCP_TRANSPORT_TYPE": "stdio"
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "EVALS_DATA_DIR": "${EVALS_DATA_DIR}"
       }
     }
   }

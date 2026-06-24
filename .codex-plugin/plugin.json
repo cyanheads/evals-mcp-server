@@ -1,25 +1,25 @@
 {
   "name": "evals-mcp-server",
   "version": "0.1.0",
-  "description": "",
+  "description": "Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval.",
   "author": {
-    "name": "",
-    "email": "",
-    "url": ""
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads"
   },
-  "homepage": "",
-  "repository": "",
+  "homepage": "https://github.com/cyanheads/evals-mcp-server",
+  "repository": "https://github.com/cyanheads/evals-mcp-server",
   "license": "Apache-2.0",
-  "keywords": ["mcp", "mcp-server", "model-context-protocol"],
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "evals", "evaluation", "grader"],
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "evals-mcp-server",
-    "shortDescription": "",
-    "longDescription": "",
-    "developerName": "",
-    "category": "",
+    "shortDescription": "Author verifiable eval records with server-enforced graders.",
+    "longDescription": "An authoring-loop MCP server that turns an agent into an eval author. Drafts carry their own executable grader; a draft → review → surgical-revise → submit loop, with a subagent verification step and a server-side committability gate (the gold must pass its grader and a negative case must be rejected), admits only self-consistent, independently verified records. Submitted records compile to JSONL, CSV, Inspect AI, and lm-evaluation-harness formats.",
+    "developerName": "cyanheads",
+    "category": "developer-tools",
     "capabilities": ["Read"],
-    "websiteURL": "",
+    "websiteURL": "https://github.com/cyanheads/evals-mcp-server",
     "defaultPrompt": []
   }
 }

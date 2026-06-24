@@ -2,8 +2,10 @@
   "manifest_version": "0.3",
   "name": "evals-mcp-server",
   "version": "0.1.0",
-  "description": "",
-  "author": { "name": "" },
+  "description": "Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval.",
+  "author": { "name": "cyanheads" },
+  "repository": { "type": "git", "url": "git+https://github.com/cyanheads/evals-mcp-server.git" },
+  "homepage": "https://github.com/cyanheads/evals-mcp-server",
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",
@@ -13,7 +15,11 @@
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
         "MCP_AUTH_MODE": "none",
-        "NODE_ENV": "production"
+        "NODE_ENV": "production",
+        "EVALS_DATA_DIR": "${user_config.evals_data_dir}",
+        "EVALS_REQUIRE_CONFIRMATION": "${user_config.evals_require_confirmation}",
+        "EVALS_DEFAULT_LICENSE": "${user_config.evals_default_license}",
+        "EVALS_CAPTURE_DIR": "${user_config.evals_capture_dir}"
       }
     }
   },
@@ -22,5 +28,31 @@
   },
   "tools_generated": true,
   "prompts_generated": true,
-  "user_config": {}
+  "user_config": {
+    "evals_data_dir": {
+      "type": "directory",
+      "title": "Data directory",
+      "description": "Root folder for record JSON. The store manages drafts/, submitted/, and exports/ subdirs under it.",
+      "required": true
+    },
+    "evals_require_confirmation": {
+      "type": "string",
+      "title": "Require submit confirmation",
+      "description": "When 'true', evals_submit_draft requests a human confirmation where the client supports elicitation.",
+      "required": false,
+      "default": "false"
+    },
+    "evals_default_license": {
+      "type": "string",
+      "title": "Default record license",
+      "description": "Default metadata.license applied when a draft omits one (e.g. CC-BY-4.0).",
+      "required": false
+    },
+    "evals_capture_dir": {
+      "type": "directory",
+      "title": "Capture directory",
+      "description": "Directory of framework-written tool-call captures; when set, captures EvalsIDs resolve to full dumps.",
+      "required": false
+    }
+  }
 }

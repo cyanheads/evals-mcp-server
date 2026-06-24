@@ -3,7 +3,8 @@
     "command": "npx",
     "args": ["-y", "evals-mcp-server"],
     "env": {
-      "MCP_TRANSPORT_TYPE": "stdio"
+      "MCP_TRANSPORT_TYPE": "stdio",
+      "EVALS_DATA_DIR": "${EVALS_DATA_DIR}"
     }
   }
 }

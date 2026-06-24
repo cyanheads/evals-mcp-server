@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "evals-mcp-server",
-  "description": "",
+  "name": "io.github.cyanheads/evals-mcp-server",
+  "description": "Author verifiable eval records through a draft→review→revise→submit loop with enforced graders.",
   "repository": {
-    "url": "",
+    "url": "https://github.com/cyanheads/evals-mcp-server",
     "source": "github"
   },
   "version": "0.1.0",
@@ -25,6 +25,31 @@
         }
       ],
       "environmentVariables": [
+        {
+          "name": "EVALS_DATA_DIR",
+          "description": "Root folder for record JSON. The store manages drafts/, submitted/, and exports/ subdirs under it.",
+          "format": "string",
+          "isRequired": true
+        },
+        {
+          "name": "EVALS_REQUIRE_CONFIRMATION",
+          "description": "When 'true', evals_submit_draft requests a human confirmation where the client supports elicitation.",
+          "format": "string",
+          "isRequired": false,
+          "default": "false"
+        },
+        {
+          "name": "EVALS_DEFAULT_LICENSE",
+          "description": "Default metadata.license applied when a draft omits one.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "EVALS_CAPTURE_DIR",
+          "description": "Directory of framework-written tool-call captures; when set, captures EvalsIDs resolve to full dumps.",
+          "format": "string",
+          "isRequired": false
+        },
         {
           "name": "MCP_LOG_LEVEL",
           "description": "Sets the minimum log level for output (e.g., 'debug', 'info', 'warn').",
@@ -81,6 +106,31 @@
           "format": "string",
           "isRequired": false,
           "default": "none"
+        },
+        {
+          "name": "EVALS_DATA_DIR",
+          "description": "Root folder for record JSON. The store manages drafts/, submitted/, and exports/ subdirs under it.",
+          "format": "string",
+          "isRequired": true
+        },
+        {
+          "name": "EVALS_REQUIRE_CONFIRMATION",
+          "description": "When 'true', evals_submit_draft requests a human confirmation where the client supports elicitation.",
+          "format": "string",
+          "isRequired": false,
+          "default": "false"
+        },
+        {
+          "name": "EVALS_DEFAULT_LICENSE",
+          "description": "Default metadata.license applied when a draft omits one.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "EVALS_CAPTURE_DIR",
+          "description": "Directory of framework-written tool-call captures; when set, captures EvalsIDs resolve to full dumps.",
+          "format": "string",
+          "isRequired": false
         },
         {
           "name": "MCP_LOG_LEVEL",
