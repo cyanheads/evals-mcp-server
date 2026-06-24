@@ -1,6 +1,6 @@
 # evals-mcp-server — Idea & Design
 
-> Status: **scaffolded** (concept stage). This is the concept + working design. It applies the **[authoring-loop archetype](./authoring-loop-pattern.md)** — read that first for the generic pattern. When the build is greenlit, this gets promoted/split into the framework-standard `docs/design.md` (MCP surface tables → implementation order).
+> Status: **built** (v1). This is the originating concept + rationale; the as-built MCP surface (tool tables, schema, error contract, implementation order) lives in [`design.md`](./design.md), and the reusable pattern in [`authoring-loop-pattern.md`](./authoring-loop-pattern.md) — read that first for the generic shape. This doc is kept as the design record of *why* the server is shaped this way; where it sketches a shape the build refined, `design.md` is authoritative.
 
 ## What it is
 

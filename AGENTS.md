@@ -11,35 +11,28 @@
 
 ---
 
-## First Session
+## This Server
 
-This project was just scaffolded with `bunx @cyanheads/mcp-ts-core init`. You're holding a production-grade MCP framework with the hard parts already solved — error handling, telemetry, auth, transport, validation, lifecycle. What's missing is the **domain**. Your job: design the tool, resource, and service surface with the user, then implement it as small pure handlers that throw — the framework catches, classifies, and instruments the rest. Design before code; the user's first messages set direction, so wait for them before scaffolding definitions.
+`evals-mcp-server` turns an agent into an **eval author**. It's an authoring-loop server (not a data-source wrapper): the agent produces a verifiable eval record through a **draft → review → surgical-revise → submit** loop, and the server acts as both scribe (normalize, persist, compile) and adversarial checker (run the record's own grader, reject what doesn't hold up). No external API — the server is the source of truth, backed by plain JSON files under `EVALS_DATA_DIR`. Full concept + as-built surface: [`docs/design.md`](docs/design.md), [`docs/idea.md`](docs/idea.md), [`docs/authoring-loop-pattern.md`](docs/authoring-loop-pattern.md).
 
-> **Remove this section** from CLAUDE.md / AGENTS.md after completing these steps. The skills and conventions below remain — this block is one-time onboarding only.
+**Surface (9 tools, 1 resource):**
 
-1. **Get your bearings.** Take stock of the project tree, the skills in `skills/`, and the tools/MCP servers available. Light tool use is fine for context-building — you're mapping the territory, not committing yet.
-2. **Read the framework docs** — `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` (builders, Context, errors, exports, conventions)
-3. **Run the `setup` skill** — read `skills/setup/SKILL.md` and follow its checklist (project orientation, agent protocol file selection, echo definition cleanup, skill sync)
-4. **Design the server** — read `skills/design-mcp-server/SKILL.md` and work through it with the user to map the domain into tools, resources, and services before scaffolding
+| Primitive | Purpose |
+|:----------|:--------|
+| `evals_describe_schema` | Required/optional fields + grader options for a `task_type` (static). |
+| `evals_create_draft` | Create a draft; reflect it back with a review protocol + subagent prompt. |
+| `evals_get_record` | Read a draft or submitted record by id. |
+| `evals_revise_draft` | Surgical `set`/`append`/`unset` patch to a draft by dotted path. |
+| `evals_discard_draft` | Delete a draft. |
+| `evals_run_check` | Run a grader against candidates, PASS/REJECT, decoupled from any record. |
+| `evals_submit_draft` | Committability gate → freeze. |
+| `evals_list_records` | Filter records by status/domain/task_type/tag (summary projection). |
+| `evals_export_records` | Compile submitted records to JSONL/CSV/Inspect/lm-eval under `exports/`. |
+| `eval://record/{id}` | Resource mirror of `evals_get_record`. |
 
----
+**Services** (`src/services/`): `eval-record` (schema, draft builder, submit gate), `grader` (DSL execution + committability check, math.js for `numeric`), `record-store` (on-disk JSON CRUD, draft→submitted freeze, exports), `exporter` (the four output formats).
 
-## What's Next?
-
-When the user asks what's next or needs direction, suggest options based on the current project state. Common next steps:
-
-1. **Re-run the `setup` skill** — ensures CLAUDE.md, skills, structure, and metadata are populated and up to date with the current codebase
-2. **Run the `design-mcp-server` skill** — if the tool/resource surface hasn't been mapped yet, work through domain design
-3. **Add tools/resources/prompts** — scaffold new definitions using the `add-tool`, `add-app-tool`, `add-resource`, `add-prompt` skills
-4. **Add services** — scaffold domain service integrations using the `add-service` skill
-5. **Add tests** — scaffold tests for existing definitions using the `add-test` skill
-6. **Field-test definitions** — exercise tools/resources/prompts with real inputs using the `field-test` skill, get a report of issues and pain points
-7. **Run `devcheck`** — lint, format, typecheck, and security audit
-8. **Run the `security-pass` skill** — audit handlers for MCP-specific security gaps: output injection, scope blast radius, input sinks, tenant isolation
-9. **Run the `polish-docs-meta` skill** — finalize README, CHANGELOG, metadata, and agent protocol for shipping
-10. **Run the `maintenance` skill** — investigate changelogs, adopt upstream changes, and sync skills after `bun update --latest`
-
-Tailor suggestions to what's actually missing or stale — don't recite the full list every time.
+**Load-bearing invariants:** records are a Zod `discriminatedUnion` on `task_type`; the grader DSL is a typed union serialized with the record (deterministic kinds run server-side, `llm_rubric` routes to sampling); the submit gate admits a record only if the gold passes its own grader, ≥1 negative is rejected, and a recorded, decorrelated independent verification agrees with the gold. Storage is the `record-store` service, **not** `ctx.state` — records must be human-inspectable files. When changing tool surface or the schema, reconcile `docs/design.md`, `README.md`, and `server.json`.
 
 ---
 

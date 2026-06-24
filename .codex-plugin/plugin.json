@@ -10,7 +10,7 @@
   "homepage": "https://github.com/cyanheads/evals-mcp-server",
   "repository": "https://github.com/cyanheads/evals-mcp-server",
   "license": "Apache-2.0",
-  "keywords": ["mcp", "mcp-server", "model-context-protocol", "evals", "evaluation", "grader"],
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "evals", "evaluation", "grader", "rlvr"],
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "evals-mcp-server",

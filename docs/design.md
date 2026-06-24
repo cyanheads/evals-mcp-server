@@ -211,7 +211,8 @@ The two instructional tools carry the loop's quality mechanism in their response
 | `negative_case_passed` | `InvalidParams` | A declared negative case passed the grader when it should have been rejected (grader accepts everything). |
 | `duplicate` | `InvalidParams` | A submitted record with the same `content_hash` already exists. |
 | `decorrelation_violation` | `InvalidParams` | The recorded verification path is the same as the generation path (no genuine independence). |
-| `capture_unresolved` | `InvalidParams` | A `captures` EvalsID has no file in `EVALS_CAPTURE_DIR` (only when capture is enabled). |
+| `capture_unresolved` | `InvalidParams` | A `captures` EvalsID has no file in `EVALS_CAPTURE_DIR`, or it recorded a failed tool call (only when capture is enabled). |
+| `submit_declined` | `InvalidParams` | A required human confirmation was declined or cancelled (when `EVALS_REQUIRE_CONFIRMATION` or `confirm` is set and the client supports elicitation). |
 
 All carry recovery guidance in the message (e.g. *"Independent verification computed 0.3571 (5/14) but gold is 25/64 (0.3906). Fix the gold or the grader before submitting."*). Baseline codes (`InternalError`, `ValidationError`, `SerializationError`) bubble freely.
 
@@ -220,7 +221,8 @@ All carry recovery guidance in the message (e.g. *"Independent verification comp
 - `evals_get_record` / `evals_revise_draft` / `evals_submit_draft` / `evals_discard_draft` — `not_found` (`NotFound`) for an unknown id.
 - `evals_revise_draft` / `evals_discard_draft` — `record_frozen` (`InvalidParams`) when targeting a `submitted` record.
 - `evals_revise_draft` — `invalid_patch_path` (`InvalidParams`) when a `set`/`unset` path doesn't resolve against the record shape. `append` targets an array field: a missing *declared-array* path is created, but a path resolving to a non-array throws `invalid_patch_path`. Setting `task_type` via `set` is prohibited (`invalid_patch_path`) — changing the discriminant would invalidate the discriminated-union constraints without re-validating the full record; start a new draft instead.
-- `evals_run_check` / `evals_create_draft` — `grader_unexecutable` (`InvalidParams`) when a grader spec can't run (e.g. a malformed math.js `target` or invalid regex) — the message names the offending field.
+- `evals_run_check` / `evals_create_draft` — `grader_unexecutable` (`InvalidParams`) when a grader spec can't run (e.g. a malformed math.js `target`, invalid regex, or a `json_match` with neither `expected` nor `schema`) — the message names the offending field.
+- `evals_create_draft` / `evals_revise_draft` — `task_type_constraint` (`InvalidParams`) when a per-task-type rule is violated (`mcq` without `choices`; `free_response` without an `llm_rubric` grader), and `mcq_choice_mismatch` (`InvalidParams`) when the `mcq` grader's `correct` is not one of `choices`. `evals_run_check` also raises `mcq_choice_mismatch` when a supplied `mcq` grader's `correct` is not among the passed `choices`.
 
 ## Services
 

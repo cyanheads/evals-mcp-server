@@ -39,10 +39,10 @@ ENV NODE_ENV=production
 # OCI image metadata (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 ARG APP_VERSION
 LABEL org.opencontainers.image.title="evals-mcp-server"
-LABEL org.opencontainers.image.description=""
+LABEL org.opencontainers.image.description="Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval."
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.version="${APP_VERSION}"
-LABEL org.opencontainers.image.source=""
+LABEL org.opencontainers.image.source="https://github.com/cyanheads/evals-mcp-server"
 
 # Copy dependency manifests
 COPY package.json bun.lock ./
@@ -71,28 +71,16 @@ RUN if [ "$OTEL_ENABLED" = "true" ]; then \
 # Copy the compiled application code from the build stage
 COPY --from=build /usr/src/app/dist ./dist
 
-# Mirror CLI (MirrorService adopters only — Tier 3, opt-in):
-# Copy your mirror lifecycle scripts and emit a runtime tsconfig so Bun resolves
-# the @/ path alias against ./dist/ rather than ./src/.
-# See the api-mirror skill for the full recipe.
-#
-# COPY --from=build /usr/src/app/scripts/<your>-mirror-init.ts \
-#                   /usr/src/app/scripts/<your>-mirror-refresh.ts \
-#                   /usr/src/app/scripts/<your>-mirror-verify.ts \
-#                   /usr/src/app/scripts/_mirror-context.ts \
-#                   ./scripts/
-# RUN echo '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./dist/*"]}}}' > tsconfig.json
-
 # The 'oven/bun' image already provides a non-root user named 'bun'.
 # We will use this existing user for enhanced security.
 
 # Create and set permissions for the log directory, assigning ownership to the 'bun' user.
 RUN mkdir -p /var/log/evals-mcp-server && chown -R bun:bun /var/log/evals-mcp-server
 
-# Writable data dirs for on-disk SQLite stores (catalog index / observations
-# mirror), owned by the runtime user. Mount a volume over either in production.
-RUN mkdir -p /usr/src/app/.cache /usr/src/app/.mirror \
-  && chown -R bun:bun /usr/src/app/.cache /usr/src/app/.mirror
+# Writable data dir for the on-disk JSON record store (drafts/, submitted/,
+# exports/), owned by the runtime user. Mount a volume over it and point
+# EVALS_DATA_DIR here in production.
+RUN mkdir -p /usr/src/app/data && chown -R bun:bun /usr/src/app/data
 
 # Switch to the non-root user
 USER bun
