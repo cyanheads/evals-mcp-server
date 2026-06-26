@@ -1,19 +1,19 @@
 <div align="center">
-  <h1>evals-mcp-server</h1>
-  <p><b>Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval.</b>
+  <h1>@cyanheads/evals-mcp-server</h1>
+  <p><b>Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval via MCP. STDIO or Streamable HTTP.</b>
   <div>9 Tools • 1 Resource</div>
   </p>
 </div>
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.1-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
 <div align="center">
 
-[![Install in Claude Desktop](https://img.shields.io/badge/Install_in-Claude_Desktop-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/cyanheads/evals-mcp-server/releases/latest/download/evals-mcp-server.mcpb) [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=evals-mcp-server&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImV2YWxzLW1jcC1zZXJ2ZXIiXX0=) [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect?url=vscode:mcp/install?%7B%22name%22%3A%22evals-mcp-server%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22evals-mcp-server%22%5D%7D)
+[![Install in Claude Desktop](https://img.shields.io/badge/Install_in-Claude_Desktop-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/cyanheads/evals-mcp-server/releases/latest/download/evals-mcp-server.mcpb) [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=evals-mcp-server&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBjeWFuaGVhZHMvZXZhbHMtbWNwLXNlcnZlciJdfQ==) [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect?url=vscode:mcp/install?%7B%22name%22%3A%22evals-mcp-server%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40cyanheads%2Fevals-mcp-server%22%5D%7D)
 
 [![Framework](https://img.shields.io/badge/Built%20on-@cyanheads/mcp--ts--core-67E8F9?style=flat-square)](https://www.npmjs.com/package/@cyanheads/mcp-ts-core)
 
@@ -116,7 +116,7 @@ Built on [`@cyanheads/mcp-ts-core`](https://www.npmjs.com/package/@cyanheads/mcp
 
 - Declarative tool and resource definitions — single file per primitive, framework handles registration and validation
 - Unified error handling — handlers throw, framework catches, classifies, and formats
-- Typed error contracts — each tool declares its domain failures (`reason` + recovery), surfaced to the agent
+- Typed error contracts — tools declare their domain failures (`reason` + recovery), surfaced to the agent
 - Pluggable auth: `none`, `jwt`, `oauth`
 - Structured logging with optional OpenTelemetry tracing
 - STDIO and Streamable HTTP transports
@@ -148,7 +148,7 @@ Add the following to your MCP client configuration file. Set `EVALS_DATA_DIR` to
     "evals-mcp-server": {
       "type": "stdio",
       "command": "bunx",
-      "args": ["evals-mcp-server@latest"],
+      "args": ["@cyanheads/evals-mcp-server@latest"],
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
         "MCP_LOG_LEVEL": "info",
@@ -167,7 +167,7 @@ Or with npx (no Bun required):
     "evals-mcp-server": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "evals-mcp-server@latest"],
+      "args": ["-y", "@cyanheads/evals-mcp-server@latest"],
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
         "MCP_LOG_LEVEL": "info",

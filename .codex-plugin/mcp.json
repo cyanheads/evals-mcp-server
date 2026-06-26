@@ -1,7 +1,7 @@
 {
   "evals-mcp-server": {
     "command": "npx",
-    "args": ["-y", "evals-mcp-server"],
+    "args": ["-y", "@cyanheads/evals-mcp-server"],
     "env": {
       "MCP_TRANSPORT_TYPE": "stdio",
       "EVALS_DATA_DIR": "${EVALS_DATA_DIR}"

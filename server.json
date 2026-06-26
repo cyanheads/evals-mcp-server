@@ -6,14 +6,14 @@
     "url": "https://github.com/cyanheads/evals-mcp-server",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "evals-mcp-server",
+      "identifier": "@cyanheads/evals-mcp-server",
       "runtimeHint": "node",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "packageArguments": [
         {
           "type": "positional",
@@ -65,9 +65,9 @@
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "evals-mcp-server",
+      "identifier": "@cyanheads/evals-mcp-server",
       "runtimeHint": "node",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "packageArguments": [
         {
           "type": "positional",

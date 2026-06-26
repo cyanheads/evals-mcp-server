@@ -1,7 +1,8 @@
 {
-  "name": "evals-mcp-server",
-  "version": "0.1.0",
-  "description": "Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval.",
+  "name": "@cyanheads/evals-mcp-server",
+  "version": "0.1.1",
+  "mcpName": "io.github.cyanheads/evals-mcp-server",
+  "description": "Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval via MCP. STDIO or Streamable HTTP.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -43,16 +44,40 @@
     "mcp",
     "mcp-server",
     "model-context-protocol",
+    "typescript",
+    "bun",
+    "stdio",
+    "streamable-http",
     "evals",
     "evaluation",
     "grader",
-    "rlvr"
+    "rlvr",
+    "verifiable-rewards",
+    "inspect-ai",
+    "lm-eval-harness",
+    "ai-agent"
   ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cyanheads/evals-mcp-server.git"
   },
+  "bugs": {
+    "url": "https://github.com/cyanheads/evals-mcp-server/issues"
+  },
+  "homepage": "https://github.com/cyanheads/evals-mcp-server#readme",
+  "author": "cyanheads <casey@caseyjhand.com> (https://github.com/cyanheads/evals-mcp-server#readme)",
+  "funding": [
+    {
+      "type": "github",
+      "url": "https://github.com/sponsors/cyanheads"
+    },
+    {
+      "type": "buy_me_a_coffee",
+      "url": "https://www.buymeacoffee.com/cyanheads"
+    }
+  ],
   "license": "Apache-2.0",
+  "packageManager": "bun@1.3.2",
   "engines": {
     "bun": ">=1.3.0",
     "node": ">=24.0.0"
@@ -64,13 +89,13 @@
     "@cyanheads/mcp-ts-core": "^0.10.9",
     "ajv": "^8.20.0",
     "mathjs": "^15.2.0",
-    "nanoid": "^5.1.15",
+    "nanoid": "^5.1.16",
     "pino-pretty": "^13.1.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.0.1",
     "depcheck": "^1.4.7",
     "ignore": "^7.0.5",
     "tsc-alias": "^1.8.17",
