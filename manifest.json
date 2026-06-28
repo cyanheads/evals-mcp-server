@@ -1,8 +1,8 @@
 {
   "manifest_version": "0.3",
   "name": "evals-mcp-server",
-  "version": "0.1.0",
-  "description": "Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval.",
+  "version": "0.1.1",
+  "description": "Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval via MCP. STDIO or Streamable HTTP.",
   "author": { "name": "cyanheads" },
   "repository": { "type": "git", "url": "git+https://github.com/cyanheads/evals-mcp-server.git" },
   "homepage": "https://github.com/cyanheads/evals-mcp-server",
@@ -46,13 +46,15 @@
       "type": "string",
       "title": "Default record license",
       "description": "Default metadata.license applied when a draft omits one (e.g. CC-BY-4.0).",
-      "required": false
+      "required": false,
+      "default": ""
     },
     "evals_capture_dir": {
       "type": "directory",
       "title": "Capture directory",
       "description": "Directory of framework-written tool-call captures; when set, captures EvalsIDs resolve to full dumps.",
-      "required": false
+      "required": false,
+      "default": ""
     }
   }
 }

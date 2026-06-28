@@ -1,6 +1,6 @@
 # evals-mcp-server - Directory Structure
 
-Generated on: 2026-06-24 08:19:42
+Generated on: 2026-06-26 00:36:02
 
 ```text
 evals-mcp-server/
@@ -18,6 +18,7 @@ evals-mcp-server/
 │   ├── extensions.json
 │   └── settings.json
 ├── changelog/
+│   ├── 0.1.x/
 │   └── template.md
 ├── docs/
 │   ├── authoring-loop-pattern.md
@@ -176,6 +177,7 @@ evals-mcp-server/
 ├── biome.json
 ├── bun.lock
 ├── bunfig.toml
+├── CHANGELOG.md
 ├── CLAUDE.md
 ├── devcheck.config.json
 ├── Dockerfile

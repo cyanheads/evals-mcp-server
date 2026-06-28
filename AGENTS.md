@@ -1,7 +1,7 @@
 # Developer Protocol
 
 **Server:** evals-mcp-server
-**Version:** 0.1.0
+**Version:** 0.1.1
 **Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.10.9`
 **Engines:** Bun ≥1.3.0, Node ≥24.0.0
 **MCP SDK:** `@modelcontextprotocol/sdk` ^1.29.0
@@ -53,36 +53,46 @@
 
 ```ts
 import { tool, z } from '@cyanheads/mcp-ts-core';
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { type EvalRecord, RecordPayloadSchema } from '@/services/eval-record/schema.js';
+import { getRecordStoreService } from '@/services/record-store/record-store-service.js';
 
-export const searchItems = tool('search_items', {
-  description: 'Search inventory items by query.',
-  annotations: { readOnlyHint: true },
+export const getRecordTool = tool('evals_get_record', {
+  title: 'evals-mcp-server: get record',
+  description:
+    'Read a draft or submitted eval record by id. The verification subagent calls this to inspect a draft before re-deriving or looking up the gold.',
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   input: z.object({
-    query: z.string().describe('Search terms'),
-    limit: z.number().default(10).describe('Max results'),
+    id: z.string().describe('The record id to read, e.g. "ev_7Qk2mNpXa".'),
   }),
   output: z.object({
-    items: z.array(z.object({
-      id: z.string().describe('Item ID'),
-      name: z.string().describe('Item name'),
-    })).describe('Matching items'),
+    record: RecordPayloadSchema.describe('The full eval record, including its grader and verification evidence.'),
   }),
-  auth: ['inventory:read'],
+
+  // Typed error contract — declares the domain failures this tool surfaces; the
+  // record-store throws a notFound that classifies to this `not_found` reason.
+  errors: [
+    {
+      reason: 'not_found',
+      code: JsonRpcErrorCode.NotFound,
+      when: 'No record exists with the given id.',
+      recovery: 'Use evals_list_records to browse existing record ids, then retry with a valid one.',
+    },
+  ],
 
   async handler(input, ctx) {
-    const items = await findItems(input.query, input.limit);
-    ctx.log.info('Search completed', { query: input.query, count: items.length });
-    return { items };
+    const record = await getRecordStoreService().require(input.id);
+    ctx.log.debug('Read record', { id: record.id, status: record.status });
+    return { record };
   },
 
   // format() populates content[] — the markdown twin of structuredContent.
   // Different clients read different surfaces (Claude Code → structuredContent,
   // Claude Desktop → content[]); both must carry the same data.
-  // Enforced at lint time: every field in `output` must appear in the rendered text.
-  format: (result) => [{
-    type: 'text',
-    text: result.items.map(i => `**${i.id}**: ${i.name}`).join('\n'),
-  }],
+  format: (result) => {
+    const r = result.record as EvalRecord;
+    return [{ type: 'text', text: `# ${r.id} (${r.status}) — ${r.task_type} · ${r.metadata.domain}` }];
+  },
 });
 ```
 
@@ -90,34 +100,29 @@ export const searchItems = tool('search_items', {
 
 ```ts
 import { resource, z } from '@cyanheads/mcp-ts-core';
-import { notFound } from '@cyanheads/mcp-ts-core/errors';
+import { RecordObjectSchema } from '@/services/eval-record/schema.js';
+import { getRecordStoreService } from '@/services/record-store/record-store-service.js';
 
-export const itemData = resource('inventory://{itemId}', {
-  description: 'Fetch an inventory item by ID.',
-  params: z.object({ itemId: z.string().describe('Item identifier') }),
-  auth: ['inventory:read'],
+export const evalRecordResource = resource('eval://record/{id}', {
+  name: 'eval-record',
+  title: 'eval-record',
+  description: 'A single draft or submitted eval record by id — the same payload evals_get_record returns.',
+  mimeType: 'application/json',
+  params: z.object({ id: z.string().describe('The record id, e.g. "ev_7Qk2mNpXa".') }),
+  output: RecordObjectSchema,
+
   async handler(params, ctx) {
-    const item = await ctx.state.get(`item:${params.itemId}`);
-    if (!item) throw notFound(`Item ${params.itemId} not found`, { itemId: params.itemId });
-    return item;
+    // require() throws a notFound classified to the resource's typed error contract.
+    const record = await getRecordStoreService().require(params.id);
+    ctx.log.debug('Resolved record resource', { id: record.id, status: record.status });
+    return record;
   },
-});
-```
 
-### Prompt
-
-```ts
-import { prompt, z } from '@cyanheads/mcp-ts-core';
-
-export const reviewCode = prompt('review_code', {
-  description: 'Review code for issues and best practices.',
-  args: z.object({
-    code: z.string().describe('Code to review'),
-    language: z.string().optional().describe('Programming language'),
-  }),
-  generate: (args) => [
-    { role: 'user', content: { type: 'text', text: `Review this ${args.language ?? ''} code:\n${args.code}` } },
-  ],
+  // list() enumerates resolvable URIs for resource-capable clients.
+  list: async () => {
+    const { summaries } = await getRecordStoreService().listSummaries({ limit: 100 });
+    return { resources: summaries.map((s) => ({ uri: `eval://record/${s.id}`, name: `${s.id} (${s.status})` })) };
+  },
 });
 ```
 
@@ -129,23 +134,31 @@ import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
 
 const ServerConfigSchema = z.object({
-  apiKey: z.string().describe('External API key'),
-  maxResults: z.coerce.number().default(100),
-  verboseLogging: z.stringbool().default(false).describe('Enable verbose logging'),
+  dataDir: z
+    .string()
+    .min(1)
+    .describe('Root folder for record JSON. The store manages drafts/, submitted/, and exports/ under it.'),
+  requireConfirmation: z
+    .stringbool()
+    .default(false)
+    .describe('When true, evals_submit_draft fires ctx.elicit for human confirmation where supported.'),
+  defaultLicense: z.string().optional().describe('Default metadata.license applied when a draft omits one.'),
+  captureDir: z.string().optional().describe('Directory of framework-written tool-call captures.'),
 });
 
 let _config: z.infer<typeof ServerConfigSchema> | undefined;
 export function getServerConfig() {
   _config ??= parseEnvConfig(ServerConfigSchema, {
-    apiKey: 'MY_API_KEY',
-    maxResults: 'MY_MAX_RESULTS',
-    verboseLogging: 'MY_VERBOSE_LOGGING',
+    dataDir: 'EVALS_DATA_DIR',
+    requireConfirmation: 'EVALS_REQUIRE_CONFIRMATION',
+    defaultLicense: 'EVALS_DEFAULT_LICENSE',
+    captureDir: 'EVALS_CAPTURE_DIR',
   });
   return _config;
 }
 ```
 
-`parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`MY_API_KEY`) not the path (`apiKey`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
+`parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`EVALS_DATA_DIR`) not the path (`dataDir`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
 
 For env booleans use `z.stringbool()`, never `z.coerce.boolean()` — `Boolean("false")` is `true`, so a coerced flag can't be disabled through the environment. `z.stringbool()` parses `true/false/1/0/yes/no/on/off` and rejects anything else, so `=false` actually disables.
 
@@ -155,12 +168,12 @@ For env booleans use `z.stringbool()`, never `z.coerce.boolean()` — `Boolean("
 
 ```ts
 await createApp({
-  name: 'my-mcp-server',
-  title: 'My Server',                         // human-readable display name
-  websiteUrl: 'https://github.com/owner/repo', // canonical homepage URL
-  description: 'One-line description.',        // wins over MCP_SERVER_DESCRIPTION
-  icons: [{ src: 'https://example.com/icon.png', sizes: ['48x48'], mimeType: 'image/png' }],
-  instructions: 'Use shortcut alpha for the most common case.', // session-level context
+  name: 'evals-mcp-server',
+  title: 'evals-mcp-server', // must equal the unscoped package name — enforced by lint:packaging
+  instructions:
+    'Author verifiable eval records through the draft → review → revise → submit loop. Call evals_describe_schema, then evals_create_draft; verify the gold in a fresh subagent, then evals_submit_draft.',
+  // description is NOT set here — it derives from package.json (the canonical source); a copy is drift.
+  // createApp() also accepts optional websiteUrl and icons forwarded to the initialize response.
 });
 ```
 

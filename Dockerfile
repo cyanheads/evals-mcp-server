@@ -39,7 +39,7 @@ ENV NODE_ENV=production
 # OCI image metadata (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 ARG APP_VERSION
 LABEL org.opencontainers.image.title="evals-mcp-server"
-LABEL org.opencontainers.image.description="Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval."
+LABEL org.opencontainers.image.description="Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval via MCP. STDIO or Streamable HTTP."
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.version="${APP_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/cyanheads/evals-mcp-server"
