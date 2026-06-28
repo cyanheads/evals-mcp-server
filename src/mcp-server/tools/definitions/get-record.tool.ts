@@ -14,7 +14,7 @@ import { getRecordStoreService } from '@/services/record-store/record-store-serv
 export const getRecordTool = tool('evals_get_record', {
   title: 'evals-mcp-server: get record',
   description:
-    'Read a draft or submitted eval record by id. The verification subagent calls this to inspect a draft before re-deriving or looking up the gold. The id is stable across submit, so it resolves a record whether it is still a draft or already submitted.',
+    'Read a draft or submitted eval record by id. The id is stable across submit, so it resolves a record whether it is still a draft or already submitted.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   input: z.object({
     id: z.string().describe('The record id to read, e.g. "ev_7Qk2mNpXa".'),
