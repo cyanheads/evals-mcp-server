@@ -133,7 +133,7 @@ describe('evals_create_draft — validation rejections', () => {
     ).rejects.toMatchObject({ data: { reason: 'task_type_constraint' } });
   });
 
-  it('throws task_type_constraint when mcq grader.correct is not among choices', async () => {
+  it('throws mcq_choice_mismatch when mcq grader.correct is not among choices', async () => {
     await expect(
       createDraftTool.handler(
         createDraftTool.input.parse({
@@ -147,7 +147,7 @@ describe('evals_create_draft — validation rejections', () => {
         }),
         createCtx,
       ),
-    ).rejects.toMatchObject({ data: { reason: 'task_type_constraint' } });
+    ).rejects.toMatchObject({ data: { reason: 'mcq_choice_mismatch' } });
   });
 
   it('throws task_type_constraint for free_response without an llm_rubric grader', async () => {

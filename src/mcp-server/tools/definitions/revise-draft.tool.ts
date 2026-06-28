@@ -96,7 +96,7 @@ export const reviseDraftTool = tool('evals_revise_draft', {
     {
       reason: 'task_type_constraint',
       code: JsonRpcErrorCode.InvalidParams,
-      when: 'The patch left the record violating a per-task-type rule (mcq correct not in choices; free_response without llm_rubric grader).',
+      when: 'The patch left the record violating a per-task-type rule (mcq without choices; free_response without llm_rubric grader).',
       recovery: 'Adjust choices/grader so the task-type constraint holds, then retry.',
     },
     {

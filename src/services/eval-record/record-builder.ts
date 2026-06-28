@@ -65,7 +65,7 @@ export function assertTaskTypeConstraints(
       throw validationError(
         `mcq grader correct answer "${record.grader.correct}" must equal one element of choices[]: ${record.choices.join(', ')}.`,
         {
-          reason: 'task_type_constraint',
+          reason: 'mcq_choice_mismatch',
           task_type: 'mcq',
         },
       );

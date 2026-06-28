@@ -114,7 +114,7 @@ export const createDraftTool = tool('evals_create_draft', {
     {
       reason: 'task_type_constraint',
       code: JsonRpcErrorCode.InvalidParams,
-      when: 'A per-task-type rule is violated (mcq without choices or a correct not in choices; free_response without an llm_rubric grader).',
+      when: 'A per-task-type rule is violated (mcq without choices; free_response without an llm_rubric grader).',
       recovery:
         'Add the missing field — provide choices for mcq, or an llm_rubric grader for free_response — then retry.',
     },
