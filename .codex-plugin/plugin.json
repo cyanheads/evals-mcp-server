@@ -1,6 +1,6 @@
 {
   "name": "evals-mcp-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Author verifiable eval records through a draft → review → revise → submit loop with server-enforced graders; compile to JSONL/CSV/Inspect/lm-eval via MCP. STDIO or Streamable HTTP.",
   "author": {
     "name": "cyanheads",

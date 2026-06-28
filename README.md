@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.1-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -29,7 +29,7 @@ Nine tools for authoring eval records — the draft loop (create, revise, discar
 |:---|:---|
 | `evals_describe_schema` | Return the required and optional fields plus grader options for a task type. Call before drafting. |
 | `evals_create_draft` | Create a draft eval record carrying its own grader; returns the parsed record, a review protocol, and a verification subagent prompt. |
-| `evals_get_record` | Read a draft or submitted record by id — the verification subagent's entry point. |
+| `evals_get_record` | Read a draft or submitted record by id; the id is stable across submit. |
 | `evals_revise_draft` | Apply a surgical `set` / `append` / `unset` patch to a draft by dotted path; re-runs the self-consistency check. |
 | `evals_discard_draft` | Delete a draft record by id. Draft-only. |
 | `evals_run_check` | Run a grader spec against candidate answers and get PASS/REJECT per candidate, decoupled from any saved record. |
@@ -243,7 +243,7 @@ All server configuration is validated at startup via Zod schemas in `src/config/
 
 | Variable | Description | Default |
 |:---|:---|:---|
-| `EVALS_DATA_DIR` | **Required.** Root folder for record JSON; the store manages `drafts/`, `submitted/`, and `exports/` under it. | — |
+| `EVALS_DATA_DIR` | Root folder for record JSON; the store manages `drafts/`, `submitted/`, and `exports/` under it. | `./evals-data` |
 | `EVALS_REQUIRE_CONFIRMATION` | When `true`, `evals_submit_draft` fires a human-confirmation elicit where the client supports it. | `false` |
 | `EVALS_DEFAULT_LICENSE` | Default `metadata.license` applied when a draft omits one (e.g. `CC-BY-4.0`). | — |
 | `EVALS_CAPTURE_DIR` | Directory of framework-written tool-call captures; when set, `captures` EvalsIDs resolve to full dumps. | — |

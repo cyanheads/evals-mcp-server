@@ -1,6 +1,6 @@
 # evals-mcp-server - Directory Structure
 
-Generated on: 2026-06-26 00:36:02
+Generated on: 2026-06-28 04:55:54
 
 ```text
 evals-mcp-server/
@@ -158,6 +158,8 @@ evals-mcp-server/
 │   │       └── record-store-service.ts
 │   └── index.ts
 ├── tests/
+│   ├── config/
+│   │   └── server-config.test.ts
 │   ├── services/
 │   │   ├── exporter.test.ts
 │   │   ├── grader.test.ts
