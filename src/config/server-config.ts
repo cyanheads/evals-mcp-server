@@ -11,12 +11,17 @@ import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
 
 const ServerConfigSchema = z.object({
-  dataDir: z
-    .string()
-    .min(1)
-    .describe(
-      'Root folder for record JSON. The store manages drafts/, submitted/, and exports/ under it.',
-    ),
+  dataDir: z.preprocess(
+    // A blank EVALS_DATA_DIR (the .mcpb bundle sends "" for an empty Desktop directory field) is treated as unset so the default applies.
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z
+      .string()
+      .min(1)
+      .default('./evals-data')
+      .describe(
+        'Root folder for record JSON. The store manages drafts/, submitted/, and exports/ under it.',
+      ),
+  ),
   requireConfirmation: z
     .stringbool()
     .default(false)
@@ -41,8 +46,8 @@ let _config: ServerConfig | undefined;
 
 /**
  * Lazily parse and cache the server configuration from the environment.
- * Throws `ConfigurationError` (rendered as a startup banner) when `EVALS_DATA_DIR`
- * is missing or any value is malformed.
+ * Throws `ConfigurationError` (rendered as a startup banner) when a value is
+ * malformed. `EVALS_DATA_DIR` defaults to `./evals-data` when unset or blank.
  */
 export function getServerConfig(): ServerConfig {
   _config ??= parseEnvConfig(ServerConfigSchema, {
