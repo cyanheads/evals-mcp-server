@@ -169,7 +169,7 @@ The response returns the updated record, what changed, and a re-run of the cheap
 
 Three layers, in order of strength:
 
-1. **Server-side determinism (the gate).** For deterministic grader kinds, `evals_submit_draft` runs the verdict itself — gold must pass, negatives must be rejected. For `llm_rubric`, the server runs the judge via `ctx.sample` *when the client supports sampling*; otherwise the author runs it and the record is flagged `server_verified: false`.
+1. **Server-side determinism (the gate).** For deterministic grader kinds, `evals_submit_draft` runs the verdict itself — gold must pass, negatives must be rejected. `llm_rubric` rests on recorded independent verification and the record is flagged `server_verified: false`.
 2. **Subagent decorrelation (the correctness check).** A fresh Sonnet-class subagent, connected to the server, reviews the draft via `evals_get_record` and reports concisely. Fresh context = no shared reasoning state with the author = genuine independence, stronger than the author re-checking its own work. The subagent is **read-only**; the author records its findings onto the record (via `evals_revise_draft`) as evidence.
 3. **Author's own decorrelated check (fallback / supplement).** When a subagent isn't available, or in addition to one, the author confirms the gold by a method *different from how it was generated* (`evals_run_check`, a fleet source, working backward). `submit` requires *some* recorded independent verification — the subagent's report or this.
 
@@ -224,7 +224,7 @@ $EVALS_DATA_DIR/
 | Env var | Required | Description |
 |---|---|---|
 | `EVALS_DATA_DIR` | yes | Root folder for record JSON (`drafts/`, `submitted/`) |
-| `EVALS_REQUIRE_CONFIRMATION` | no (default `false`) | When `true`, `evals_submit_draft` fires `ctx.elicit` for human confirmation where the client supports it |
+| `EVALS_REQUIRE_CONFIRMATION` | no (default `false`) | When `true`, `evals_submit_draft` requests human confirmation before finalizing |
 | `EVALS_DEFAULT_LICENSE` | no | Default `metadata.license` when a draft omits it |
 | `EVALS_CAPTURE_DIR` | no | Dir of framework-written tool-call captures (same path the fleet servers write to); when set, `captures` EvalsIDs resolve to full dumps |
 
@@ -259,9 +259,9 @@ The grader DSL maps to each harness's scoring primitive where one exists; unmapp
 
 ## Resolved design decisions (v1 direction)
 
-1. **Verification — server runs the grader; a fresh subagent provides decorrelated correctness review.** Deterministic kinds graded server-side (hard gate); `llm_rubric` via `ctx.sample` when available, else agent-attested + flagged. The decorrelated check (subagent, or the author's own independent derivation) is required and recorded; it's what catches a wrong gold.
+1. **Verification — server runs deterministic graders; a fresh subagent provides decorrelated correctness review.** Deterministic kinds are graded server-side (hard gate); `llm_rubric` rests on recorded independent verification and is flagged `server_verified: false`. The decorrelated check is required and recorded; it's what catches a wrong gold.
 2. **Fleet grounding via authoritative framework capture (EvalsID), not agent-carried.** Framework servers write full tool outputs to a shared capture dir keyed by an EvalsID; the eval server reads it and embeds the dump; the agent supplies only the linking id + its own data — never the source of truth for provenance. No outbound MCP client (it reads files; stdio can't be dialed). Framework feature: cyanheads/mcp-ts-core#247.
-3. **No per-submit human elicit by default.** The draft→review→submit loop is the confirmation, and it's the agent's; per-record human elicit would kill batch authoring. Optional `EVALS_REQUIRE_CONFIRMATION` / per-call flag fires `ctx.elicit` when supported. The natural human checkpoint is export, not per-record submit.
+3. **No per-submit human confirmation by default.** The draft→review→submit loop is the confirmation, and it's the agent's; per-record confirmation would kill batch authoring. Optional `EVALS_REQUIRE_CONFIRMATION` / per-call flag requests confirmation through multi-round input. The natural human checkpoint is export, not per-record submit.
 4. **Plain JSON files under `EVALS_DATA_DIR`** (drafts/ + submitted/), tenant-subdir when hosted. Drops the earlier DataCanvas/StorageService machinery in favor of inspectable on-disk records.
 
 ## Appendix: worked round-trip (`numeric`)
