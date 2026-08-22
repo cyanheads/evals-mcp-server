@@ -17,7 +17,7 @@ import { reviseDraftTool } from '@/mcp-server/tools/definitions/revise-draft.too
 import { initRecordStoreService } from '@/services/record-store/record-store-service.js';
 
 let dataDir: string;
-const ctx = createMockContext();
+const createCtx = createMockContext({ errors: createDraftTool.errors });
 const reviseCtx = createMockContext({ errors: reviseDraftTool.errors });
 
 /** Create a valid MCQ draft and return its id. */
@@ -32,7 +32,7 @@ async function createMcqDraft(): Promise<string> {
       discrimination: { positive: ['B'], negative: ['A'] },
       metadata: { domain: 'math.primes', tags: ['mcq'] },
     }),
-    ctx,
+    createCtx,
   );
   return result.draft_id;
 }

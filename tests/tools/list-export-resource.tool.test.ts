@@ -14,7 +14,10 @@ import { join } from 'node:path';
 import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
-import { evalRecordResource } from '@/mcp-server/resources/definitions/eval-record.resource.js';
+import {
+  evalRecordResource,
+  listEvalRecordResources,
+} from '@/mcp-server/resources/definitions/eval-record.resource.js';
 import { createDraftTool } from '@/mcp-server/tools/definitions/create-draft.tool.js';
 import { exportRecordsTool } from '@/mcp-server/tools/definitions/export-records.tool.js';
 import { listRecordsTool } from '@/mcp-server/tools/definitions/list-records.tool.js';
@@ -112,7 +115,7 @@ describe('evals_list_records', () => {
       ctx,
     );
     expect(tagged.records).toHaveLength(1);
-    expect(tagged.records[0].status).toBe('draft');
+    expect(tagged.records[0]?.status).toBe('draft');
   });
 
   it('discloses truncation through enrichment when limit is hit', async () => {
@@ -159,7 +162,9 @@ describe('evals_export_records', () => {
     const artifact = await readFile(result.path, 'utf8');
     const lines = artifact.trim().split('\n');
     expect(lines).toHaveLength(2);
-    expect((JSON.parse(lines[0]) as EvalRecord).status).toBe('submitted');
+    const firstLine = lines[0];
+    if (!firstLine) throw new Error('Expected the JSONL artifact to contain a first record.');
+    expect((JSON.parse(firstLine) as EvalRecord).status).toBe('submitted');
   });
 
   it('exports a filtered subset and names the artifact by filter', async () => {
@@ -213,13 +218,15 @@ describe('eval://record/{id} resource', () => {
       listRecordsTool.input.parse({ status: 'submitted', limit: 1 }),
       ctx,
     );
-    const id = list.records[0].id;
+    const firstRecord = list.records[0];
+    if (!firstRecord) throw new Error('Expected at least one submitted record.');
+    const id = firstRecord.id;
     const resourceCtx = createMockContext({
       uri: new URL(`eval://record/${id}`),
       errors: evalRecordResource.errors,
     });
     const record = await evalRecordResource.handler(
-      evalRecordResource.params.parse({ id }),
+      evalRecordResource.params!.parse({ id }),
       resourceCtx,
     );
     expect((record as EvalRecord).id).toBe(id);
@@ -233,14 +240,14 @@ describe('eval://record/{id} resource', () => {
     });
     await expect(
       evalRecordResource.handler(
-        evalRecordResource.params.parse({ id: 'ev_missing0000' }),
+        evalRecordResource.params!.parse({ id: 'ev_missing0000' }),
         resourceCtx,
       ),
     ).rejects.toMatchObject({ data: { reason: 'not_found' } });
   });
 
   it('list() enumerates available record URIs with names', async () => {
-    const listing = await evalRecordResource.list!();
+    const listing = await listEvalRecordResources();
     expect(listing.resources.length).toBeGreaterThan(0);
     for (const r of listing.resources) {
       expect(r.uri).toMatch(/^eval:\/\/record\/ev_/);

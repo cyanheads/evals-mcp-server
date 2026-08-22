@@ -20,8 +20,8 @@ import type { EvalRecord } from '@/services/eval-record/schema.js';
 import { initRecordStoreService } from '@/services/record-store/record-store-service.js';
 
 let dataDir: string;
-const ctx = createMockContext();
 const createCtx = createMockContext({ errors: createDraftTool.errors });
+const getCtx = createMockContext({ errors: getRecordTool.errors });
 
 beforeAll(async () => {
   dataDir = await mkdtemp(join(tmpdir(), 'evals-create-'));
@@ -94,7 +94,7 @@ describe('evals_create_draft — happy path and seeding', () => {
     );
     const fetched = await getRecordTool.handler(
       getRecordTool.input.parse({ id: result.draft_id }),
-      ctx,
+      getCtx,
     );
     expect((fetched.record as EvalRecord).captures).toEqual(['secedgar_a1b2c3d4']);
   });

@@ -3,7 +3,7 @@
  * condition in isolation (grader_failed_on_gold, missing_negative_case,
  * negative_case_passed, verification_incomplete, verification_disagrees_with_gold,
  * decorrelation_violation, duplicate), the success verdict shape, and the
- * llm_rubric-without-sampling branch (steps 1–2 skipped, admitted on recorded
+ * llm_rubric branch (steps 1–2 skipped, admitted on recorded
  * verification, server_verified=false). Drives runSubmitGate directly against a
  * temp-dir store so dedup reads hit real disk.
  * @module tests/services/submit-gate.test
@@ -65,7 +65,7 @@ describe('runSubmitGate — deterministic committability', () => {
   it('passes a fully ready record and reports the verdict + decorrelation source', async () => {
     const rec = readyRecord();
     rec.content_hash = store.computeContentHash(rec);
-    const result = await runSubmitGate(rec, store, { samplingAvailable: false });
+    const result = await runSubmitGate(rec, store);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.grader_run.gold).toBe('PASS');
@@ -76,9 +76,7 @@ describe('runSubmitGate — deterministic committability', () => {
   });
 
   it('refuses grader_failed_on_gold when the gold does not pass its grader', async () => {
-    const result = await runSubmitGate(readyRecord({ gold: '99/100' }), store, {
-      samplingAvailable: false,
-    });
+    const result = await runSubmitGate(readyRecord({ gold: '99/100' }), store);
     expect(result).toMatchObject({ ok: false, failure: { reason: 'grader_failed_on_gold' } });
   });
 
@@ -86,7 +84,6 @@ describe('runSubmitGate — deterministic committability', () => {
     const result = await runSubmitGate(
       readyRecord({ discrimination: { positive: ['10/28'], negative: [] } }),
       store,
-      { samplingAvailable: false },
     );
     expect(result).toMatchObject({ ok: false, failure: { reason: 'missing_negative_case' } });
   });
@@ -96,7 +93,6 @@ describe('runSubmitGate — deterministic committability', () => {
     const result = await runSubmitGate(
       readyRecord({ discrimination: { positive: ['10/28'], negative: ['0.357'] } }),
       store,
-      { samplingAvailable: false },
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -108,7 +104,6 @@ describe('runSubmitGate — deterministic committability', () => {
     const result = await runSubmitGate(
       readyRecord({ verification: { method: 'note', evidence: [] } }),
       store,
-      { samplingAvailable: false },
     );
     expect(result).toMatchObject({ ok: false, failure: { reason: 'verification_incomplete' } });
   });
@@ -130,7 +125,6 @@ describe('runSubmitGate — deterministic committability', () => {
         },
       }),
       store,
-      { samplingAvailable: false },
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -156,7 +150,6 @@ describe('runSubmitGate — deterministic committability', () => {
         },
       }),
       store,
-      { samplingAvailable: false },
     );
     expect(result).toMatchObject({
       ok: false,
@@ -181,7 +174,6 @@ describe('runSubmitGate — deterministic committability', () => {
         },
       }),
       store,
-      { samplingAvailable: false },
     );
     expect(result).toMatchObject({ ok: false, failure: { reason: 'decorrelation_violation' } });
   });
@@ -193,7 +185,7 @@ describe('runSubmitGate — deterministic committability', () => {
     // A new draft (different id) with identical task content.
     const dup = readyRecord({ id: 'ev_dup0000000' });
     dup.content_hash = store.computeContentHash(dup);
-    const result = await runSubmitGate(dup, store, { samplingAvailable: false });
+    const result = await runSubmitGate(dup, store);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.reason).toBe('duplicate');
@@ -201,7 +193,7 @@ describe('runSubmitGate — deterministic committability', () => {
   });
 });
 
-describe('runSubmitGate — llm_rubric without sampling', () => {
+describe('runSubmitGate — llm_rubric', () => {
   let dir: string;
   let store: RecordStoreService;
   beforeEach(async () => {
@@ -231,7 +223,7 @@ describe('runSubmitGate — llm_rubric without sampling', () => {
   it('admits on recorded verification alone with server_verified=false and gold SKIPPED', async () => {
     const rec = rubricRecord();
     rec.content_hash = store.computeContentHash(rec);
-    const result = await runSubmitGate(rec, store, { samplingAvailable: false });
+    const result = await runSubmitGate(rec, store);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.grader_run.server_verified).toBe(false);
@@ -242,7 +234,6 @@ describe('runSubmitGate — llm_rubric without sampling', () => {
     const result = await runSubmitGate(
       rubricRecord({ discrimination: { positive: [], negative: [] } }),
       store,
-      { samplingAvailable: false },
     );
     expect(result).toMatchObject({ ok: false, failure: { reason: 'missing_negative_case' } });
   });
@@ -251,7 +242,6 @@ describe('runSubmitGate — llm_rubric without sampling', () => {
     const result = await runSubmitGate(
       rubricRecord({ verification: { method: 'note', evidence: [] } }),
       store,
-      { samplingAvailable: false },
     );
     expect(result).toMatchObject({ ok: false, failure: { reason: 'verification_incomplete' } });
   });

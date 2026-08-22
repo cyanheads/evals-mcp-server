@@ -22,8 +22,8 @@ import { initRecordStoreService } from '@/services/record-store/record-store-ser
 
 let dataDir: string;
 let captureDir: string;
-const ctx = createMockContext();
 const createCtx = createMockContext({ errors: createDraftTool.errors });
+const getCtx = createMockContext({ errors: getRecordTool.errors });
 const submitCtx = createMockContext({ errors: submitDraftTool.errors });
 
 /** Write a capture dump file the store can resolve. */
@@ -98,7 +98,7 @@ describe('evals_submit_draft — capture resolution', () => {
     ).rejects.toMatchObject({ data: { reason: 'capture_unresolved' } });
     // Still a draft.
     expect(
-      (await getRecordTool.handler(getRecordTool.input.parse({ id }), ctx)).record,
+      (await getRecordTool.handler(getRecordTool.input.parse({ id }), getCtx)).record,
     ).toMatchObject({ status: 'draft' });
   });
 
@@ -147,10 +147,10 @@ describe('evals_submit_draft — capture resolution', () => {
     expect(submitted.status).toBe('submitted');
 
     // The frozen record embeds the capture and lifts a source_provenance entry.
-    const frozen = (await getRecordTool.handler(getRecordTool.input.parse({ id }), ctx))
+    const frozen = (await getRecordTool.handler(getRecordTool.input.parse({ id }), getCtx))
       .record as EvalRecord;
     expect(frozen.captured_outputs).toHaveLength(1);
-    expect(frozen.captured_outputs?.[0].evals_id).toBe('secedgar_ok000000');
+    expect(frozen.captured_outputs?.[0]?.evals_id).toBe('secedgar_ok000000');
     const lifted = frozen.metadata.source_provenance ?? [];
     expect(lifted.some((s) => s.server === 'secedgar' && s.uri === 'trace:abc123')).toBe(true);
   });

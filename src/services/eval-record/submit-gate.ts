@@ -6,7 +6,7 @@
  * verification path must differ from the generation path), resolves and embeds
  * capture dumps, and checks content_hash dedup. Returns a typed failure (which
  * the tool maps to ctx.fail) or the verdict the tool freezes on. llm_rubric
- * without sampling skips steps 1–2 and admits on recorded verification alone.
+ * skips steps 1–2 and admits on recorded verification alone.
  * @module services/eval-record/submit-gate
  */
 
@@ -86,57 +86,38 @@ function describeVerification(record: EvalRecord): {
 /**
  * Run the full committability gate against a draft. Pure except for the two
  * async store reads (capture resolution + dedup); never mutates or persists —
- * the caller freezes on `ok: true`. `samplingAvailable` is true when the client
- * exposes ctx.sample (then llm_rubric is graded by the caller and passed in via
- * `llmRubricVerdict`); otherwise llm_rubric admits on recorded verification.
+ * the caller freezes on `ok: true`. llm_rubric admits on recorded independent
+ * verification because it is not executable by this server.
  */
 export async function runSubmitGate(
   record: EvalRecord,
   store: RecordStoreService,
-  opts: {
-    samplingAvailable: boolean;
-    llmRubricGoldPass?: boolean;
-    llmRubricNegativeRejected?: boolean[];
-  },
 ): Promise<GateResult> {
   const isLlmRubric = record.grader.kind === 'llm_rubric';
-  const serverVerified = !isLlmRubric || opts.samplingAvailable;
+  const serverVerified = !isLlmRubric;
 
   let goldStatus: 'PASS' | 'SKIPPED' = 'SKIPPED';
   let positivesSummary = 'SKIPPED';
   let negativesSummary = 'SKIPPED';
 
-  // ---- Step 1+2: deterministic committability (skipped for llm_rubric w/o sampling) ----
+  // ---- Step 1+2: deterministic committability (skipped for llm_rubric) ----
   if (serverVerified) {
     // Step 1 — gold must pass.
-    if (isLlmRubric) {
-      if (opts.llmRubricGoldPass !== true) {
-        return {
-          ok: false,
-          failure: {
-            reason: 'grader_failed_on_gold',
-            message:
-              'The llm_rubric judge did not score the gold as PASS. Fix the gold, the rubric, or the threshold before submitting.',
-          },
-        };
-      }
-    } else {
-      const goldResult = gradeCandidate(record.grader, record.gold, record.gold, record.choices);
-      if (!goldResult.pass) {
-        return {
-          ok: false,
-          failure: {
-            reason: 'grader_failed_on_gold',
-            message: `The declared grader did not return PASS against the declared gold (${goldResult.detail}). Fix the gold or the grader before submitting.`,
-            data: { detail: goldResult.detail },
-          },
-        };
-      }
-      const positivesPass = record.discrimination.positive.map(
-        (p) => gradeCandidate(record.grader, p, record.gold, record.choices).pass,
-      );
-      positivesSummary = `${positivesPass.filter(Boolean).length}/${positivesPass.length} PASS`;
+    const goldResult = gradeCandidate(record.grader, record.gold, record.gold, record.choices);
+    if (!goldResult.pass) {
+      return {
+        ok: false,
+        failure: {
+          reason: 'grader_failed_on_gold',
+          message: `The declared grader did not return PASS against the declared gold (${goldResult.detail}). Fix the gold or the grader before submitting.`,
+          data: { detail: goldResult.detail },
+        },
+      };
     }
+    const positivesPass = record.discrimination.positive.map(
+      (candidate) => gradeCandidate(record.grader, candidate, record.gold, record.choices).pass,
+    );
+    positivesSummary = `${positivesPass.filter(Boolean).length}/${positivesPass.length} PASS`;
     goldStatus = 'PASS';
 
     // Step 2 — at least one negative, all negatives rejected.
@@ -150,11 +131,9 @@ export async function runSubmitGate(
         },
       };
     }
-    const negativeVerdicts = isLlmRubric
-      ? (opts.llmRubricNegativeRejected ?? record.discrimination.negative.map(() => false))
-      : record.discrimination.negative.map(
-          (n) => !gradeCandidate(record.grader, n, record.gold, record.choices).pass,
-        );
+    const negativeVerdicts = record.discrimination.negative.map(
+      (candidate) => !gradeCandidate(record.grader, candidate, record.gold, record.choices).pass,
+    );
     const firstAccepted = negativeVerdicts.findIndex((rejected) => !rejected);
     if (firstAccepted !== -1) {
       const offending = record.discrimination.negative[firstAccepted];
@@ -169,7 +148,7 @@ export async function runSubmitGate(
     }
     negativesSummary = `${negativeVerdicts.filter(Boolean).length}/${negativeVerdicts.length} REJECTED`;
   } else {
-    // llm_rubric without sampling: still require a negative case is declared (the discrimination contract).
+    // llm_rubric still requires a declared negative case as part of the discrimination contract.
     if (record.discrimination.negative.length === 0) {
       return {
         ok: false,

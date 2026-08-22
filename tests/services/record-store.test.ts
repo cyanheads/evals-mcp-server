@@ -205,6 +205,7 @@ describe('RecordStoreService — applyPatch', () => {
       } catch (e) {
         return e as { data?: { reason?: string }; message: string };
       }
+      throw new Error('Expected setting task_type to throw.');
     })();
     expect(err?.data?.reason).toBe('invalid_patch_path');
     expect(err?.message).toContain('start a new draft');
@@ -324,7 +325,7 @@ describe('RecordStoreService — listSummaries', () => {
     expect(drafts.total).toBe(2);
     const submitted = await store.listSummaries({ status: 'submitted', limit: 50 });
     expect(submitted.summaries.map((s) => s.id)).toEqual(['ev_three00000']);
-    expect(submitted.summaries[0].submitted_at).toBeDefined();
+    expect(submitted.summaries[0]?.submitted_at).toBeDefined();
   });
 
   it('filters by domain, task_type, and tag', async () => {
@@ -344,6 +345,22 @@ describe('RecordStoreService — listSummaries', () => {
 });
 
 describe('RecordStoreService — fs errors never leak internal paths', () => {
+  type ClientError = {
+    code?: unknown;
+    data: { reason: string; code?: string; recovery?: { hint?: string } };
+    message: string;
+  };
+
+  /** Capture an expected rejection without leaving a resolved-value union in the type. */
+  async function captureRejection<T>(operation: Promise<T>): Promise<ClientError> {
+    try {
+      await operation;
+    } catch (error) {
+      return error as ClientError;
+    }
+    throw new Error('Expected operation to reject.');
+  }
+
   /** Assert a thrown value carries no absolute path, stack frame, or temp-file artifact. */
   function assertLeakFree(err: { code?: unknown; data?: unknown; message: string }): void {
     const surfaces = [err.message, JSON.stringify(err.data ?? {})];
@@ -368,14 +385,7 @@ describe('RecordStoreService — fs errors never leak internal paths', () => {
     await writeFile(filePath, 'x', 'utf8');
     const store = new RecordStoreService(filePath, undefined);
 
-    const err = await store.init().catch(
-      (e) =>
-        e as {
-          code?: unknown;
-          data: { reason: string; code?: string; recovery?: { hint?: string } };
-          message: string;
-        },
-    );
+    const err = await captureRejection(store.init());
     expect(err.data.reason).toBe('storage_unavailable');
     // The errno class is surfaced (actionable, path-free); the path is not.
     expect(err.message).not.toContain(base);
@@ -410,9 +420,7 @@ describe('RecordStoreService — fs errors never leak internal paths', () => {
     // Create a *directory* named like a record file, so readFile hits EISDIR, not ENOENT.
     await mkdir(join(dir, 'drafts', 'ev_isadir00000.json'), { recursive: true });
 
-    const err = await store
-      .read('ev_isadir00000')
-      .catch((e) => e as { data: { reason: string }; message: string });
+    const err = await captureRejection(store.read('ev_isadir00000'));
     expect(err.data.reason).toBe('storage_unavailable');
     assertLeakFree(err);
 

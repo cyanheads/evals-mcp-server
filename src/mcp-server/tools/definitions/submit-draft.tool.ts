@@ -5,14 +5,13 @@
  * negative is rejected; a recorded, decorrelated, agreeing independent
  * verification is present; not a duplicate), and on pass flips the record to
  * submitted, stamps submitted_at + checksum, and freezes it. Refuses with a typed
- * error otherwise, leaving the record a draft. llm_rubric is judged via ctx.sample
- * when the client supports sampling, else admitted on recorded verification with
- * server_verified=false.
+ * error otherwise, leaving the record a draft. llm_rubric is admitted on recorded
+ * independent verification with server_verified=false.
  * @module mcp-server/tools/definitions/submit-draft.tool
  */
 
-import { type Context, tool, z } from '@cyanheads/mcp-ts-core';
-import { invalidParams, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { type Context, inputRequired, tool, z } from '@cyanheads/mcp-ts-core';
+import { JsonRpcErrorCode, validationError } from '@cyanheads/mcp-ts-core/errors';
 import { getServerConfig } from '@/config/server-config.js';
 import type { Capture, EvalRecord } from '@/services/eval-record/schema.js';
 import { runSubmitGate } from '@/services/eval-record/submit-gate.js';
@@ -29,7 +28,7 @@ async function resolveCaptures(record: EvalRecord, ctx: Context): Promise<EvalRe
   for (const id of record.captures) {
     const capture = await store.resolveCapture(id);
     if (capture === null) {
-      throw invalidParams(
+      throw validationError(
         `Capture "${id}" has no file in EVALS_CAPTURE_DIR. Re-run the source tool to regenerate it, or remove it from captures before submitting.`,
         {
           reason: 'capture_unresolved',
@@ -39,7 +38,7 @@ async function resolveCaptures(record: EvalRecord, ctx: Context): Promise<EvalRe
     }
     dumps.push(capture);
     if (capture.isError) {
-      throw invalidParams(
+      throw validationError(
         `Capture "${id}" recorded a failed tool call; it cannot ground a gold answer. Remove it or replace it with a successful capture.`,
         {
           reason: 'capture_unresolved',
@@ -68,10 +67,14 @@ async function resolveCaptures(record: EvalRecord, ctx: Context): Promise<EvalRe
   };
 }
 
+const SubmitConfirmationSchema = z.object({
+  confirm: z.boolean().describe('Confirm that the eval record should be finalized and frozen.'),
+});
+
 export const submitDraftTool = tool('evals_submit_draft', {
   title: 'evals-mcp-server: submit draft',
   description:
-    'Finalize a draft through the committability gate. The server runs the grader against the gold (must PASS), rejects ≥1 declared negative case, requires a recorded, decorrelated independent verification that agrees with the gold, embeds any resolved captures, and checks for duplicates; on pass it flips the record to submitted, stamps submitted_at and a checksum, and freezes it. It refuses with a typed error otherwise and the record stays a draft. For free_response the llm_rubric grader is judged via sampling when the client supports it, else the record is admitted on recorded verification alone and flagged server_verified=false.',
+    'Finalize a draft through the committability gate. The server runs deterministic graders against the gold (must PASS), rejects ≥1 declared negative case, requires a recorded, decorrelated independent verification that agrees with the gold, embeds any resolved captures, and checks for duplicates; on pass it flips the record to submitted, stamps submitted_at and a checksum, and freezes it. It refuses with a typed error otherwise and the record stays a draft. For free_response, llm_rubric is not executable by this server; the record is admitted on recorded independent verification and flagged server_verified=false.',
   annotations: {
     readOnlyHint: false,
     idempotentHint: true,
@@ -84,7 +87,7 @@ export const submitDraftTool = tool('evals_submit_draft', {
       .boolean()
       .optional()
       .describe(
-        'When true, force a human confirmation elicit before finalizing (also triggered by EVALS_REQUIRE_CONFIRMATION).',
+        'When true, require client confirmation through multi-round input before finalizing (also triggered by EVALS_REQUIRE_CONFIRMATION).',
       ),
   }),
   output: z.object({
@@ -96,15 +99,13 @@ export const submitDraftTool = tool('evals_submit_draft', {
       .object({
         gold: z
           .enum(['PASS', 'SKIPPED'])
-          .describe(
-            'Whether the gold passed the grader (SKIPPED for llm_rubric without sampling).',
-          ),
+          .describe('Whether the gold passed the grader (SKIPPED for llm_rubric).'),
         positives: z.string().describe('Positive-case verdict summary, e.g. "3/3 PASS".'),
         negatives: z.string().describe('Negative-case verdict summary, e.g. "1/1 REJECTED".'),
         server_verified: z
           .boolean()
           .describe(
-            'True when the grader ran server-side; false for llm_rubric admitted without sampling.',
+            'True when the grader ran server-side; false for llm_rubric admitted on recorded verification.',
           ),
       })
       .describe('The grader verdicts produced by the gate.'),
@@ -127,66 +128,66 @@ export const submitDraftTool = tool('evals_submit_draft', {
     },
     {
       reason: 'record_frozen',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The id refers to an already-submitted record.',
       recovery:
         'The record is already finalized; nothing to submit. Read it with evals_get_record.',
     },
     {
       reason: 'verification_incomplete',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'No recorded independent verification (no subagent report and no author decorrelated check).',
       recovery:
         'Append a subagent report or your own decorrelated check to verification.evidence, then retry.',
     },
     {
       reason: 'grader_failed_on_gold',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The declared grader, run against the declared gold, did not return PASS.',
       recovery: 'Fix the gold so it passes its grader, or fix the grader spec, then retry.',
     },
     {
       reason: 'verification_disagrees_with_gold',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'A recorded independent verification computed a value that disagrees with the gold.',
       recovery:
         'Reconcile the gold with the independent computation — fix whichever is wrong — then retry.',
     },
     {
       reason: 'missing_negative_case',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'discrimination.negative is empty — nothing proves the grader rejects a wrong answer.',
       recovery: 'Add at least one known-wrong negative case via evals_revise_draft, then retry.',
     },
     {
       reason: 'negative_case_passed',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'A declared negative case passed the grader when it should be rejected.',
       recovery:
         'Tighten the grader or fix the negative case so the wrong answer is rejected, then retry.',
     },
     {
       reason: 'duplicate',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'A submitted record with the same content_hash already exists.',
       recovery: 'Discard this draft or change the task content so it is not a duplicate.',
     },
     {
       reason: 'decorrelation_violation',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The recorded verification path is the same as the generation path (no genuine independence).',
       recovery: 'Verify the gold by a method different from how it was generated, then retry.',
     },
     {
       reason: 'capture_unresolved',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'A captures EvalsID has no file in EVALS_CAPTURE_DIR (only when capture is enabled).',
       recovery:
         'Re-run the source tool to regenerate the capture, or remove the id from captures, then retry.',
     },
     {
       reason: 'submit_declined',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'A required human confirmation was declined or cancelled.',
       recovery: 'Re-run evals_submit_draft and accept the confirmation to finalize.',
     },
@@ -202,13 +203,33 @@ export const submitDraftTool = tool('evals_submit_draft', {
       });
     }
 
-    // Optional human confirmation before finalize.
-    if ((cfg.requireConfirmation || input.confirm) && ctx.elicit) {
-      const result = await ctx.elicit(
-        `Finalize and freeze eval record ${existing.id} (${existing.task_type}, domain ${existing.metadata.domain})?`,
-        z.object({ confirm: z.boolean().describe('Confirm finalize') }),
-      );
-      if (result.action !== 'accept' || result.content?.confirm !== true) {
+    // Optional human confirmation before finalize. A declined or cancelled response is
+    // terminal; re-requesting it would loop until the client's round budget is exhausted.
+    if (cfg.requireConfirmation || input.confirm) {
+      const response = ctx.inputs.view('submit_confirmation');
+      if (response.kind === 'elicit' && response.action !== 'accept') {
+        throw ctx.fail('submit_declined', 'Submission was not confirmed.', {
+          ...ctx.recoveryFor('submit_declined'),
+        });
+      }
+
+      const confirmation = ctx.inputs.accepted('submit_confirmation', SubmitConfirmationSchema);
+      if (response.kind === 'elicit' && !confirmation) {
+        throw ctx.fail('submit_declined', 'Submission confirmation was invalid.', {
+          ...ctx.recoveryFor('submit_declined'),
+        });
+      }
+      if (!confirmation) {
+        return ctx.requestInput({
+          inputRequests: {
+            submit_confirmation: inputRequired.elicit({
+              message: `Finalize and freeze eval record ${existing.id} (${existing.task_type}, domain ${existing.metadata.domain})?`,
+              requestedSchema: SubmitConfirmationSchema,
+            }),
+          },
+        });
+      }
+      if (!confirmation.confirm) {
         throw ctx.fail('submit_declined', 'Submission was not confirmed.', {
           ...ctx.recoveryFor('submit_declined'),
         });
@@ -246,7 +267,7 @@ export const submitDraftTool = tool('evals_submit_draft', {
     }
 
     // Run the committability gate.
-    const gate = await runSubmitGate(withCaptures, store, { samplingAvailable: false });
+    const gate = await runSubmitGate(withCaptures, store);
     if (!gate.ok) {
       throw ctx.fail(gate.failure.reason, gate.failure.message, {
         ...ctx.recoveryFor(gate.failure.reason),

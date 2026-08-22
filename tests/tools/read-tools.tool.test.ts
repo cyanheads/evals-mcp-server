@@ -22,6 +22,7 @@ import { type EvalRecord, TASK_TYPES } from '@/services/eval-record/schema.js';
 import { initRecordStoreService } from '@/services/record-store/record-store-service.js';
 
 const ctx = createMockContext();
+const getCtx = createMockContext({ errors: getRecordTool.errors });
 const runCheckCtx = createMockContext({ errors: runCheckTool.errors });
 
 describe('evals_describe_schema', () => {
@@ -47,14 +48,14 @@ describe('evals_describe_schema', () => {
     expect(result.notes).toContain('choices');
   });
 
-  it('adds the llm_rubric requirement and sampling note for free_response', async () => {
+  it('adds the llm_rubric and recorded-verification requirements for free_response', async () => {
     const result = await describeSchemaTool.handler(
       describeSchemaTool.input.parse({ task_type: 'free_response' }),
       ctx,
     );
     expect(result.required_fields.some((f) => f.includes('llm_rubric'))).toBe(true);
     expect(result.grader_kinds).toContain('llm_rubric');
-    expect(result.notes).toContain('ctx.sample');
+    expect(result.notes).toContain('recorded independent verification');
   });
 
   it('format() renders the task type, gold shape, and required fields', async () => {
@@ -70,8 +71,8 @@ describe('evals_describe_schema', () => {
 });
 
 describe('evals_run_check', () => {
-  it('grades multiple candidates and reports the pass_count + resolved reference', () => {
-    const result = runCheckTool.handler(
+  it('grades multiple candidates and reports the pass_count + resolved reference', async () => {
+    const result = await runCheckTool.handler(
       runCheckTool.input.parse({
         grader: { kind: 'numeric', target: '5/14', rel_tol: 1e-3 },
         candidates: ['5/14', '10/28', '25/64'],
@@ -80,12 +81,12 @@ describe('evals_run_check', () => {
     );
     expect(result.pass_count).toBe(2);
     expect(result.results.map((r) => r.pass)).toEqual([true, true, false]);
-    expect(result.results[0].resolved).toBeCloseTo(0.3571428, 6);
+    expect(result.results[0]?.resolved).toBeCloseTo(0.3571428, 6);
   });
 
-  it('uses gold for exact_match and ignores it for target-embedding kinds', () => {
+  it('uses gold for exact_match and ignores it for target-embedding kinds', async () => {
     // gold supplies the reference for exact_match.
-    const exact = runCheckTool.handler(
+    const exact = await runCheckTool.handler(
       runCheckTool.input.parse({
         grader: { kind: 'exact_match', normalize: ['trim', 'lowercase'] },
         candidates: ['  PARIS '],
@@ -93,10 +94,10 @@ describe('evals_run_check', () => {
       }),
       runCheckCtx,
     );
-    expect(exact.results[0].pass).toBe(true);
+    expect(exact.results[0]?.pass).toBe(true);
 
     // gold is a no-op (not an error) for numeric.
-    const numeric = runCheckTool.handler(
+    const numeric = await runCheckTool.handler(
       runCheckTool.input.parse({
         grader: { kind: 'numeric', target: '5/14' },
         candidates: ['5/14'],
@@ -104,7 +105,7 @@ describe('evals_run_check', () => {
       }),
       runCheckCtx,
     );
-    expect(numeric.results[0].pass).toBe(true);
+    expect(numeric.results[0]?.pass).toBe(true);
   });
 
   it('throws grader_unexecutable for a malformed math.js target', async () => {
@@ -161,8 +162,8 @@ describe('evals_run_check', () => {
     ).toThrow();
   });
 
-  it('format() renders PASS/REJECT per candidate and the count line', () => {
-    const result = runCheckTool.handler(
+  it('format() renders PASS/REJECT per candidate and the count line', async () => {
+    const result = await runCheckTool.handler(
       runCheckTool.input.parse({
         grader: { kind: 'numeric', target: '5/14', rel_tol: 1e-3 },
         candidates: ['5/14', '25/64'],
@@ -215,7 +216,7 @@ describe('evals_get_record', () => {
   });
 
   it('format() renders the id, status, prompt, gold, and the full JSON block', async () => {
-    const result = await getRecordTool.handler(getRecordTool.input.parse({ id: recordId }), ctx);
+    const result = await getRecordTool.handler(getRecordTool.input.parse({ id: recordId }), getCtx);
     const text = (getRecordTool.format!(result)[0] as { text: string }).text;
     expect(text).toContain(recordId);
     expect(text).toContain('(draft)');

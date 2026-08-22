@@ -26,7 +26,7 @@ const ServerConfigSchema = z.object({
     .stringbool()
     .default(false)
     .describe(
-      'When true, evals_submit_draft fires ctx.elicit for human confirmation where the client supports it.',
+      'When true, evals_submit_draft requests human confirmation before finalizing the record.',
     ),
   defaultLicense: z
     .string()

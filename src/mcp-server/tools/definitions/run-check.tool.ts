@@ -16,7 +16,7 @@ import { gradeCandidate } from '@/services/grader/grader-service.js';
 export const runCheckTool = tool('evals_run_check', {
   title: 'evals-mcp-server: run check',
   description:
-    'Run a grader spec against one or more candidate answers and get a PASS/REJECT verdict per candidate, plus the resolved comparison value (e.g. the math.js-evaluated numeric target). Use it mid-loop to re-derive or spot-check a gold independently of any saved record. For grader kinds that grade against a reference rather than embedding one (exact_match), supply gold; it is ignored for target-embedding kinds like numeric and mcq. llm_rubric cannot run here — it is graded at submit via sampling.',
+    'Run a deterministic grader spec against one or more candidate answers and get a PASS/REJECT verdict per candidate, plus the resolved comparison value (e.g. the math.js-evaluated numeric target). Use it mid-loop to re-derive or spot-check a gold independently of any saved record. For grader kinds that grade against a reference rather than embedding one (exact_match), supply gold; it is ignored for target-embedding kinds like numeric and mcq. llm_rubric cannot run on this server and requires recorded independent verification before submit.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   input: z.object({
     grader: GraderSchema,
@@ -62,14 +62,14 @@ export const runCheckTool = tool('evals_run_check', {
   errors: [
     {
       reason: 'grader_unexecutable',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The grader spec cannot run (malformed math.js target, invalid regex, missing json_match reference, or llm_rubric).',
       recovery:
         'Fix the named grader field — correct the math.js expression, regex pattern, or supply expected/schema — then retry.',
     },
     {
       reason: 'mcq_choice_mismatch',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The mcq grader correct answer is not one of the supplied choices.',
       recovery:
         'Set grader.correct to one of the choices, or correct the choices array, then retry.',

@@ -3,9 +3,8 @@
  * grader DSL kinds (numeric via math.js, exact/set/regex/mcq/json) returning
  * PASS/REJECT per candidate with the resolved comparison value, plus the
  * committability self-consistency aggregate (gold + positives pass, negatives
- * rejected). `llm_rubric` is not graded here — it routes to ctx.sample at the
- * call site when sampling is available, else the record rests on recorded
- * verification. Throws `validationError` with `reason: 'grader_unexecutable'`
+ * rejected). `llm_rubric` is not graded here; the record rests on recorded
+ * independent verification. Throws `validationError` with `reason: 'grader_unexecutable'`
  * (or `reason: 'mcq_choice_mismatch'`) when a spec cannot run.
  * @module services/grader/grader-service
  */
@@ -188,8 +187,8 @@ function canonicalJson(value: unknown): string {
  * the reference for gold-relative kinds (`exact_match`); it is ignored by
  * target-embedding kinds. `choices` validates the `mcq` correct answer.
  *
- * Throws for `llm_rubric` (not deterministic) — callers route that kind to
- * sampling. Throws `grader_unexecutable` when a spec is malformed.
+ * Throws for `llm_rubric` (not deterministic). Throws `grader_unexecutable`
+ * when a spec is malformed.
  */
 export function gradeCandidate(
   grader: Grader,
@@ -354,7 +353,7 @@ export function gradeCandidate(
 
     case 'llm_rubric':
       throw validationError(
-        'llm_rubric is not a deterministic grader and cannot run via evals_run_check; it is graded at submit via ctx.sample.',
+        'llm_rubric is not a deterministic grader and cannot run on this server; record an independent verification before submitting.',
         {
           reason: 'grader_unexecutable',
           field: 'kind',

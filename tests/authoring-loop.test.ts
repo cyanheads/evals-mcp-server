@@ -10,7 +10,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, expectInputRequired } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
 import { createDraftTool } from '@/mcp-server/tools/definitions/create-draft.tool.js';
@@ -25,9 +25,12 @@ import { initExporterService } from '@/services/exporter/exporter-service.js';
 import { initRecordStoreService } from '@/services/record-store/record-store-service.js';
 
 let dataDir: string;
-// A plain context for tools that throw only via service-layer factories.
 const ctx = createMockContext();
 // Contexts wired with each tool's error contract so handler-level ctx.fail(...) resolves.
+const createCtx = createMockContext({ errors: createDraftTool.errors });
+const discardCtx = createMockContext({ errors: discardDraftTool.errors });
+const getCtx = createMockContext({ errors: getRecordTool.errors });
+const runCheckCtx = createMockContext({ errors: runCheckTool.errors });
 const submitCtx = createMockContext({ errors: submitDraftTool.errors });
 const reviseCtx = createMockContext({ errors: reviseDraftTool.errors });
 
@@ -64,7 +67,7 @@ afterAll(async () => {
 describe('full authoring loop', () => {
   it('create → run_check → revise → submit → get/list → export', async () => {
     // --- 1. create_draft -------------------------------------------------
-    const created = await createDraftTool.handler(probabilityDraftInput(), ctx);
+    const created = await createDraftTool.handler(probabilityDraftInput(), createCtx);
     expect(created.status).toBe('draft');
     expect(created.draft_id).toMatch(/^ev_/);
     const id = created.draft_id;
@@ -84,10 +87,10 @@ describe('full authoring loop', () => {
         grader: { kind: 'numeric', target: 'combinations(5,2)/combinations(8,2)' },
         candidates: ['5/14', '25/64'],
       }),
-      ctx,
+      runCheckCtx,
     );
-    expect(check.results[0].pass).toBe(true); // 5/14 confirmed
-    expect(check.results[1].pass).toBe(false); // 25/64 rejected
+    expect(check.results[0]?.pass).toBe(true); // 5/14 confirmed
+    expect(check.results[1]?.pass).toBe(false); // 25/64 rejected
     expect(check.pass_count).toBe(1);
 
     // --- 3. revise_draft (loosen tolerance, record the subagent finding) -
@@ -108,13 +111,13 @@ describe('full authoring loop', () => {
         },
         set: { 'verification.method': 'subagent_independent_derivation' },
       }),
-      ctx,
+      reviseCtx,
     );
     expect(revised.changed.length).toBeGreaterThanOrEqual(2);
     expect(revised.server_checks.self_consistency.ready_to_submit).toBe(true);
 
     // --- 4. get_record reflects the patch --------------------------------
-    const fetched = await getRecordTool.handler(getRecordTool.input.parse({ id }), ctx);
+    const fetched = await getRecordTool.handler(getRecordTool.input.parse({ id }), getCtx);
     const rec = fetched.record as {
       discrimination: { positive: unknown[] };
       verification: { evidence: unknown[] };
@@ -143,7 +146,7 @@ describe('full authoring loop', () => {
     expect(submitted.verification.evidence_count).toBe(1);
 
     // The id is stable; get_record resolves the now-submitted record.
-    const afterSubmit = await getRecordTool.handler(getRecordTool.input.parse({ id }), ctx);
+    const afterSubmit = await getRecordTool.handler(getRecordTool.input.parse({ id }), getCtx);
     expect((afterSubmit.record as { status: string }).status).toBe('submitted');
 
     // The draft file is gone; the submitted file exists.
@@ -155,7 +158,7 @@ describe('full authoring loop', () => {
     // --- 7. export_records (JSONL artifact actually contains the record) -
     const exported = await exportRecordsTool.handler(
       exportRecordsTool.input.parse({ format: 'jsonl' }),
-      ctx,
+      createCtx,
     );
     expect(exported.record_count).toBe(1);
     expect(exported.bytes).toBeGreaterThan(0);
@@ -184,7 +187,7 @@ describe('submit gate refusals (the record stays a draft)', () => {
   ): Promise<string> {
     const created = await createDraftTool.handler(
       createDraftTool.input.parse({ ...probabilityDraftInput(), ...overrides }),
-      ctx,
+      createCtx,
     );
     return created.draft_id;
   }
@@ -198,7 +201,7 @@ describe('submit gate refusals (the record stays a draft)', () => {
     });
     // Still a draft.
     expect(
-      (await getRecordTool.handler(getRecordTool.input.parse({ id }), ctx)).record,
+      (await getRecordTool.handler(getRecordTool.input.parse({ id }), getCtx)).record,
     ).toMatchObject({ status: 'draft' });
   });
 
@@ -280,12 +283,103 @@ describe('submit gate refusals (the record stays a draft)', () => {
       ...probabilityDraftInput(),
       verification: { method: 'note', evidence: [{ type: 'note', text: 'placeholder' }] },
     });
-    const dup = await createDraftTool.handler(dupInput, ctx);
+    const dup = await createDraftTool.handler(dupInput, createCtx);
     await expect(
       submitDraftTool.handler(submitDraftTool.input.parse({ draft_id: dup.draft_id }), submitCtx),
     ).rejects.toMatchObject({
       data: { reason: 'duplicate' },
     });
+  });
+});
+
+describe('submit confirmation', () => {
+  it('requests confirmation, then resumes and submits after acceptance', async () => {
+    const created = await createDraftTool.handler(
+      createDraftTool.input.parse({
+        ...probabilityDraftInput(),
+        prompt: 'Distinct prompt G — confirmation round trip',
+        verification: {
+          method: 'independent_derivation',
+          evidence: [{ type: 'note', text: 'independently verified before confirmation' }],
+        },
+      }),
+      createCtx,
+    );
+    const input = submitDraftTool.input.parse({ draft_id: created.draft_id, confirm: true });
+
+    const requested = await expectInputRequired(() =>
+      submitDraftTool.handler(input, createMockContext({ errors: submitDraftTool.errors })),
+    );
+    expect(requested.inputRequests).toHaveProperty('submit_confirmation');
+    expect(
+      (await getRecordTool.handler(getRecordTool.input.parse({ id: created.draft_id }), getCtx))
+        .record,
+    ).toMatchObject({ status: 'draft' });
+
+    const acceptedCtx = createMockContext({
+      errors: submitDraftTool.errors,
+      inputResponses: {
+        submit_confirmation: { action: 'accept', content: { confirm: true } },
+      },
+    });
+    const submitted = await submitDraftTool.handler(input, acceptedCtx);
+
+    expect(submitted.status).toBe('submitted');
+    expect(submitted.frozen).toBe(true);
+  });
+
+  it('treats a declined confirmation as terminal and leaves the record a draft', async () => {
+    const created = await createDraftTool.handler(
+      createDraftTool.input.parse({
+        ...probabilityDraftInput(),
+        prompt: 'Distinct prompt H — declined confirmation',
+        verification: {
+          method: 'independent_derivation',
+          evidence: [{ type: 'note', text: 'independently verified before confirmation' }],
+        },
+      }),
+      createCtx,
+    );
+    const input = submitDraftTool.input.parse({ draft_id: created.draft_id, confirm: true });
+    const declinedCtx = createMockContext({
+      errors: submitDraftTool.errors,
+      inputResponses: { submit_confirmation: { action: 'decline' } },
+    });
+
+    await expect(submitDraftTool.handler(input, declinedCtx)).rejects.toMatchObject({
+      data: { reason: 'submit_declined' },
+    });
+    expect(
+      (await getRecordTool.handler(getRecordTool.input.parse({ id: created.draft_id }), getCtx))
+        .record,
+    ).toMatchObject({ status: 'draft' });
+  });
+
+  it('rejects malformed accepted confirmation content and leaves the record a draft', async () => {
+    const created = await createDraftTool.handler(
+      createDraftTool.input.parse({
+        ...probabilityDraftInput(),
+        prompt: 'Distinct prompt I — invalid confirmation content',
+        verification: {
+          method: 'independent_derivation',
+          evidence: [{ type: 'note', text: 'independently verified before confirmation' }],
+        },
+      }),
+      createCtx,
+    );
+    const input = submitDraftTool.input.parse({ draft_id: created.draft_id, confirm: true });
+    const invalidCtx = createMockContext({
+      errors: submitDraftTool.errors,
+      inputResponses: { submit_confirmation: { action: 'accept', content: {} } },
+    });
+
+    await expect(submitDraftTool.handler(input, invalidCtx)).rejects.toMatchObject({
+      data: { reason: 'submit_declined' },
+    });
+    expect(
+      (await getRecordTool.handler(getRecordTool.input.parse({ id: created.draft_id }), getCtx))
+        .record,
+    ).toMatchObject({ status: 'draft' });
   });
 });
 
@@ -296,15 +390,18 @@ describe('discard + frozen guards', () => {
         ...probabilityDraftInput(),
         prompt: 'Distinct prompt F — to discard',
       }),
-      ctx,
+      createCtx,
     );
     const discarded = await discardDraftTool.handler(
       discardDraftTool.input.parse({ draft_id: created.draft_id }),
-      ctx,
+      discardCtx,
     );
     expect(discarded.discarded).toBe(true);
     await expect(
-      discardDraftTool.handler(discardDraftTool.input.parse({ draft_id: created.draft_id }), ctx),
+      discardDraftTool.handler(
+        discardDraftTool.input.parse({ draft_id: created.draft_id }),
+        discardCtx,
+      ),
     ).rejects.toMatchObject({
       data: { reason: 'not_found' },
     });
@@ -327,7 +424,10 @@ describe('discard + frozen guards', () => {
       data: { reason: 'record_frozen' },
     });
     await expect(
-      discardDraftTool.handler(discardDraftTool.input.parse({ draft_id: submittedId! }), ctx),
+      discardDraftTool.handler(
+        discardDraftTool.input.parse({ draft_id: submittedId! }),
+        discardCtx,
+      ),
     ).rejects.toMatchObject({
       data: { reason: 'record_frozen' },
     });
@@ -339,7 +439,7 @@ describe('discard + frozen guards', () => {
         ...probabilityDraftInput(),
         prompt: 'Distinct prompt G — bad patch',
       }),
-      ctx,
+      createCtx,
     );
     await expect(
       reviseDraftTool.handler(

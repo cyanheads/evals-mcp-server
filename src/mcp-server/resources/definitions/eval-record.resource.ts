@@ -12,6 +12,17 @@ import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { RecordObjectSchema } from '@/services/eval-record/schema.js';
 import { getRecordStoreService } from '@/services/record-store/record-store-service.js';
 
+/** List the records currently available through the eval:// resource surface. */
+export async function listEvalRecordResources() {
+  const { summaries } = await getRecordStoreService().listSummaries({ limit: 100 });
+  return {
+    resources: summaries.map((summary) => ({
+      uri: `eval://record/${summary.id}`,
+      name: `${summary.id} (${summary.status})`,
+    })),
+  };
+}
+
 export const evalRecordResource = resource('eval://record/{id}', {
   name: 'eval-record',
   title: 'eval-record',
@@ -37,13 +48,5 @@ export const evalRecordResource = resource('eval://record/{id}', {
     return record;
   },
 
-  list: async () => {
-    const { summaries } = await getRecordStoreService().listSummaries({ limit: 100 });
-    return {
-      resources: summaries.map((s) => ({
-        uri: `eval://record/${s.id}`,
-        name: `${s.id} (${s.status})`,
-      })),
-    };
-  },
+  list: listEvalRecordResources,
 });

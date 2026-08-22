@@ -51,7 +51,7 @@ const TASK_TYPE_GUIDE: Record<
     extraRequired: [],
   },
   free_response: {
-    summary: 'Rubric-graded prose, scored by an LLM judge via ctx.sample when available.',
+    summary: 'Rubric-graded prose admitted on recorded independent verification.',
     goldShape: 'A reference answer or exemplar; the rubric lives in the llm_rubric grader.',
     graderKinds: ['llm_rubric'],
     extraRequired: ['grader of kind llm_rubric (criteria + judge_prompt + pass_threshold)'],
@@ -113,7 +113,7 @@ export const describeSchemaTool = tool('evals_describe_schema', {
         input.task_type === 'mcq'
           ? 'mcq requires choices[] and the grader.correct must equal one element of choices[].'
           : input.task_type === 'free_response'
-            ? 'free_response requires an llm_rubric grader; it is graded server-side only when the client supports ctx.sample, otherwise it rests on recorded independent verification.'
+            ? 'free_response requires an llm_rubric grader; the grader is not executable by this server, so submission rests on recorded independent verification and reports server_verified=false.'
             : 'Provide at least one negative case so the submit gate can prove the grader rejects a wrong answer.',
     };
   },

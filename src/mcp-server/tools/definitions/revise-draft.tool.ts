@@ -81,27 +81,27 @@ export const reviseDraftTool = tool('evals_revise_draft', {
     },
     {
       reason: 'record_frozen',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The target id refers to a submitted (frozen) record.',
       recovery:
         'Submitted records are immutable; author a new draft with evals_create_draft instead.',
     },
     {
       reason: 'invalid_patch_path',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'A set/unset path does not resolve, an append targets a non-array, or a protected field (task_type, id, checksum) was targeted.',
       recovery:
         'Use a path that resolves against the record shape; do not target task_type or server-owned fields.',
     },
     {
       reason: 'task_type_constraint',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The patch left the record violating a per-task-type rule (mcq without choices; free_response without llm_rubric grader).',
       recovery: 'Adjust choices/grader so the task-type constraint holds, then retry.',
     },
     {
       reason: 'mcq_choice_mismatch',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'After the patch, the mcq grader correct answer is not one of the choices.',
       recovery: 'Set grader.correct to one of the choices, or fix the choices array, then retry.',
     },

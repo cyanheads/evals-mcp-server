@@ -160,7 +160,7 @@ export const LlmRubricGraderSchema = z
     kind: z
       .literal('llm_rubric')
       .describe(
-        'LLM-judge grader — scores a candidate against weighted criteria via ctx.sample when the client supports sampling.',
+        'LLM-judge grader specification — submission relies on recorded independent verification because this server cannot execute it.',
       ),
     criteria: z
       .array(CriterionSchema)
@@ -185,7 +185,7 @@ export const GraderSchema = z
     LlmRubricGraderSchema,
   ])
   .describe(
-    'The executable grader serialized with the record. Deterministic kinds run server-side; llm_rubric routes to ctx.sample.',
+    'The grader serialized with the record. Deterministic kinds run server-side; llm_rubric relies on recorded independent verification.',
   );
 export type Grader = z.infer<typeof GraderSchema>;
 
