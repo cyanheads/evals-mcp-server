@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.3](changelog/0.1.x/0.1.3.md) — 2026-08-22
+
+Adopts the current MCP SDK and protocol surface, including strict tool inputs, multi-round submit confirmation, and client-valid ValidationError envelopes.
+
 ## [0.1.2](changelog/0.1.x/0.1.2.md) — 2026-06-27
 
 EVALS_DATA_DIR now defaults to ./evals-data so bare npx/bunx invocations start with no env setup; mcq grader correct-not-in-choices reports mcq_choice_mismatch instead of task_type_constraint; trimmed meta-coaching from the evals_get_record description.

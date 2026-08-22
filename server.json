@@ -6,14 +6,14 @@
     "url": "https://github.com/cyanheads/evals-mcp-server",
     "source": "github"
   },
-  "version": "0.1.2",
+  "version": "0.1.3",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/evals-mcp-server",
       "runtimeHint": "node",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "packageArguments": [
         {
           "type": "positional",
@@ -34,7 +34,7 @@
         },
         {
           "name": "EVALS_REQUIRE_CONFIRMATION",
-          "description": "When 'true', evals_submit_draft requests a human confirmation where the client supports elicitation.",
+          "description": "When 'true', evals_submit_draft requests human confirmation before finalizing.",
           "format": "string",
           "isRequired": false,
           "default": "false"
@@ -68,7 +68,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/evals-mcp-server",
       "runtimeHint": "node",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "packageArguments": [
         {
           "type": "positional",
@@ -117,7 +117,7 @@
         },
         {
           "name": "EVALS_REQUIRE_CONFIRMATION",
-          "description": "When 'true', evals_submit_draft requests a human confirmation where the client supports elicitation.",
+          "description": "When 'true', evals_submit_draft requests human confirmation before finalizing.",
           "format": "string",
           "isRequired": false,
           "default": "false"

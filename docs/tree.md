@@ -1,6 +1,6 @@
 # evals-mcp-server - Directory Structure
 
-Generated on: 2026-06-28 04:55:54
+Generated on: 2026-08-22 19:18:03
 
 ```text
 evals-mcp-server/
@@ -10,10 +10,14 @@ evals-mcp-server/
 │   ├── mcp.json
 │   └── plugin.json
 ├── .github/
-│   └── ISSUE_TEMPLATE/
-│       ├── bug_report.yml
-│       ├── config.yml
-│       └── feature_request.yml
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.yml
+│   │   ├── config.yml
+│   │   └── feature_request.yml
+│   ├── CODE_OF_CONDUCT.md
+│   ├── CONTRIBUTING.md
+│   ├── FUNDING.yml
+│   └── SECURITY.md
 ├── .vscode/
 │   ├── extensions.json
 │   └── settings.json
@@ -169,10 +173,12 @@ evals-mcp-server/
 │   │   ├── create-draft.tool.test.ts
 │   │   ├── list-export-resource.tool.test.ts
 │   │   ├── read-tools.tool.test.ts
+│   │   ├── revise-draft.tool.test.ts
 │   │   └── submit-captures.tool.test.ts
 │   └── authoring-loop.test.ts
 ├── .dockerignore
 ├── .env.example
+├── .gitattributes
 ├── .gitignore
 ├── .mcpbignore
 ├── AGENTS.md

@@ -1,10 +1,10 @@
 # Developer Protocol
 
 **Server:** evals-mcp-server
-**Version:** 0.1.2
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.10.9`
+**Version:** 0.1.3
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.12.3`
 **Engines:** Bun ≥1.3.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/sdk` ^1.29.0
+**MCP SDK:** `@modelcontextprotocol/server` ^2.0.0
 **Zod:** ^4.4.3
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
@@ -32,7 +32,7 @@
 
 **Services** (`src/services/`): `eval-record` (schema, draft builder, submit gate), `grader` (DSL execution + committability check, math.js for `numeric`), `record-store` (on-disk JSON CRUD, draft→submitted freeze, exports), `exporter` (the four output formats).
 
-**Load-bearing invariants:** records are a Zod `discriminatedUnion` on `task_type`; the grader DSL is a typed union serialized with the record (deterministic kinds run server-side, `llm_rubric` routes to sampling); the submit gate admits a record only if the gold passes its own grader, ≥1 negative is rejected, and a recorded, decorrelated independent verification agrees with the gold. Storage is the `record-store` service, **not** `ctx.state` — records must be human-inspectable files. When changing tool surface or the schema, reconcile `docs/design.md`, `README.md`, and `server.json`.
+**Load-bearing invariants:** records are a Zod `discriminatedUnion` on `task_type`; the grader DSL is a typed union serialized with the record (deterministic kinds run server-side, `llm_rubric` relies on recorded independent verification); the submit gate admits a record only if the gold passes its deterministic grader, ≥1 negative is rejected, and a recorded, decorrelated independent verification agrees with the gold. Storage is the `record-store` service, **not** `ctx.state` — records must be human-inspectable files. When changing tool surface or the schema, reconcile `docs/design.md`, `README.md`, and `server.json`.
 
 ---
 
@@ -41,7 +41,7 @@
 - **Logic throws, framework catches.** Tool/resource handlers are pure — throw on failure, no `try/catch`. Plain `Error` is fine; the framework catches, classifies, and formats. Use error factories (`notFound()`, `validationError()`, etc.) when the error code matters.
 - **Use `ctx.log`** for request-scoped logging. No `console` calls.
 - **Use `ctx.state`** for tenant-scoped storage. Never access persistence directly.
-- **Check `ctx.elicit`** for presence before calling.
+- **Need input the caller didn't supply?** Read `ctx.inputs` first, then `return ctx.requestInput(...)`. Never await user input mid-handler.
 - **Secrets in env vars only** — never hardcoded.
 - **Close the loop on issues.** When implementing work tracked by a GitHub issue, comment on the issue with what landed and close it. Do both — a comment without a close leaves stale issues open; a close without a comment leaves no record of what shipped. The comment is for future readers — state the concrete changes, not the conversation that produced them.
 
@@ -141,7 +141,7 @@ const ServerConfigSchema = z.object({
   requireConfirmation: z
     .stringbool()
     .default(false)
-    .describe('When true, evals_submit_draft fires ctx.elicit for human confirmation where supported.'),
+    .describe('When true, evals_submit_draft requests human confirmation before finalizing.'),
   defaultLicense: z.string().optional().describe('Default metadata.license applied when a draft omits one.'),
   captureDir: z.string().optional().describe('Directory of framework-written tool-call captures.'),
 });
@@ -187,13 +187,15 @@ Handlers receive a unified `ctx` object. Key properties:
 
 | Property | Description |
 |:---------|:------------|
-| `ctx.log` | Request-scoped logger — `.debug()`, `.info()`, `.notice()`, `.warning()`, `.error()`. Auto-correlates requestId, traceId, tenantId. |
-| `ctx.state` | Tenant-scoped KV — `.get(key)`, `.set(key, value, { ttl? })`, `.delete(key)`, `.list(prefix, { cursor, limit })`. Accepts any serializable value. |
-| `ctx.elicit` | Ask user for structured input — form call `(message, schema)` or `.url(message, url)` for an external link. **Check for presence first:** `if (ctx.elicit) { ... }` |
+| `ctx.log` | Request-scoped logger — `.debug()`, `.info()`, `.notice()`, `.warning()`, `.error()`. Auto-correlates requestId, traceId, tenantId. Dual-sink: Pino and client logging notifications. |
+| `ctx.state` | Tenant-scoped KV — `.get(key)`, `.set(key, value, { ttl? })`, `.delete(key)`, `.getMany(keys)`, `.list(prefix, { cursor, limit })`. Accepts any serializable value. |
+| `ctx.requestInput` | Suspend and request missing input — `return ctx.requestInput({ inputRequests: { key: inputRequired.elicit(...) } })`. The handler is re-entered with responses. |
+| `ctx.inputs` | Read responses from a retried request — `.accepted(key, schema)`, `.view(key)`, `.state()`, `.dropped`. Empty on the first round. |
+| `ctx.enrich` | Success-path agent context declared by the definition and populated with `.notice()`, `.total()`, `.echo()`, or `.truncated()`. |
+| `ctx.content` | Accumulate non-text content blocks for the response. |
 | `ctx.signal` | `AbortSignal` for cancellation. |
-| `ctx.progress` | Task progress (present when `task: true`) — `.setTotal(n)`, `.increment()`, `.update(message)`. |
 | `ctx.requestId` | Unique request ID. |
-| `ctx.tenantId` | Tenant ID from JWT or `'default'` for stdio. |
+| `ctx.tenantId` | Tenant ID from JWT; `'default'` for stdio or HTTP with auth off. |
 
 ---
 
@@ -201,7 +203,7 @@ Handlers receive a unified `ctx` object. Key properties:
 
 Handlers throw — the framework catches, classifies, and formats.
 
-**Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required descriptive metadata for the agent's next move (≥ 5 words, lint-validated); for the wire `data.recovery.hint` (mirrored into `content[]` text), pass explicitly at the throw site when dynamic context matters: `ctx.fail('reason', msg, { recovery: { hint: '...' } })`. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`) bubble freely and don't need declaring.
+**Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, and the linter enforces conformance. `recovery` is required (≥5 words). Spread `ctx.recoveryFor('reason')` into the failure data to put the contract recovery on the wire; use an explicit recovery hint when runtime context matters. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`) bubble freely and don't need declaring.
 
 ```ts
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
@@ -213,7 +215,9 @@ errors: [
 ],
 async handler(input, ctx) {
   const item = await db.find(input.id);
-  if (!item) throw ctx.fail('no_match', `No item ${input.id}`);
+  if (!item) throw ctx.fail('no_match', `No item ${input.id}`, {
+    ...ctx.recoveryFor('no_match'),
+  });
   return item;
 }
 ```
@@ -307,7 +311,7 @@ Available skills:
 | `api-auth` | Auth modes, scopes, JWT/OAuth |
 | `api-canvas` | DataCanvas: register tabular data, run SQL, export, plus the `spillover()` helper for big result sets — Tier 3 opt-in |
 | `api-config` | AppConfig, parseConfig, env vars |
-| `api-context` | Context interface, logger, state, progress |
+| `api-context` | Context interface, logger, state, multi-round-trip input |
 | `api-errors` | McpError, JsonRpcErrorCode, error patterns |
 | `api-linter` | Definition linter rule catalog — invoked by `bun run lint:mcp` and `devcheck` |
 | `api-services` | LLM, Speech, Graph services |

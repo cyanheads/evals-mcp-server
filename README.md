@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -77,7 +77,7 @@ Run a grader against one or more candidates without touching a saved record.
 - PASS/REJECT per candidate plus the resolved comparison value (e.g. the math.js-evaluated numeric target), so you see why each matched or missed
 - `candidates` accepts strings, numbers, objects, or arrays — whatever the grader kind expects
 - Supply `gold` for gold-relative kinds (`exact_match`); it is a no-op for target-embedding kinds like `numeric` and `mcq`
-- `llm_rubric` cannot run here — it is graded at submit via sampling
+- `llm_rubric` cannot run on this server — submission relies on recorded independent verification
 
 ---
 
@@ -89,7 +89,7 @@ Finalize a draft through the committability gate, then freeze it.
 - Resolves and embeds any `captures` from `EVALS_CAPTURE_DIR`, cross-checking the gold against the authoritative captured value
 - Rejects duplicates (same `content_hash` already submitted)
 - On pass, flips the record to `submitted`, stamps `submitted_at` and a `checksum`, and freezes it; otherwise refuses with a typed error and the record stays a draft
-- `free_response` `llm_rubric` is judged via sampling when the client supports it, else admitted on recorded verification alone and flagged `server_verified: false`
+- `free_response` `llm_rubric` is admitted on recorded independent verification and flagged `server_verified: false`
 
 ---
 
@@ -125,7 +125,7 @@ Eval authoring:
 
 - A `draft → review → surgical-revise → submit` loop, with the server acting as both scribe (normalize, persist, compile) and adversarial checker (run the record's own grader, reject what doesn't hold up)
 - Records are a Zod `discriminatedUnion` keyed on `task_type` — `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
-- A typed grader DSL serialized with each record — deterministic kinds (`numeric` via math.js, `exact_match`, `set_match`, `regex`, `mcq`, `json_match`) run server-side; `llm_rubric` routes to sampling
+- A typed grader DSL serialized with each record — deterministic kinds (`numeric` via math.js, `exact_match`, `set_match`, `regex`, `mcq`, `json_match`) run server-side; `llm_rubric` relies on recorded independent verification
 - An enforced committability gate at submit: the gold must pass its own grader, ≥1 negative must be rejected, and a recorded decorrelated verification must agree with the gold
 - Optional fleet grounding via the `captures` EvalsID field — link framework-written tool-call dumps, resolved from `EVALS_CAPTURE_DIR` and cross-checked against the gold (no server-to-server calls)
 - Plain JSON files under `EVALS_DATA_DIR` — inspectable, diffable, version-controllable records
@@ -207,7 +207,7 @@ MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 EVALS_DATA_DIR=./evals-data bun run s
 
 ### Prerequisites
 
-- [Bun v1.3.2](https://bun.sh/) or higher (or Node.js v24+).
+- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
 - A writable directory for `EVALS_DATA_DIR`. No external API key is required.
 
 ### Installation
@@ -244,7 +244,7 @@ All server configuration is validated at startup via Zod schemas in `src/config/
 | Variable | Description | Default |
 |:---|:---|:---|
 | `EVALS_DATA_DIR` | Root folder for record JSON; the store manages `drafts/`, `submitted/`, and `exports/` under it. | `./evals-data` |
-| `EVALS_REQUIRE_CONFIRMATION` | When `true`, `evals_submit_draft` fires a human-confirmation elicit where the client supports it. | `false` |
+| `EVALS_REQUIRE_CONFIRMATION` | When `true`, `evals_submit_draft` requests human confirmation through multi-round input before finalizing. | `false` |
 | `EVALS_DEFAULT_LICENSE` | Default `metadata.license` applied when a draft omits one (e.g. `CC-BY-4.0`). | — |
 | `EVALS_CAPTURE_DIR` | Directory of framework-written tool-call captures; when set, `captures` EvalsIDs resolve to full dumps. | — |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
