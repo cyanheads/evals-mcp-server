@@ -74,4 +74,4 @@ The subagent is **recommended, not required** — the server can't detect or for
 
 ## Promotion
 
-This file is the seed for a server-shape entry in `mcp-ts-core/skills/design-mcp-server/SKILL.md`. Promoting it is a framework change (versioned skill) and is deferred to a deliberate, Casey-directed step.
+This file is the seed for a server-shape entry in `mcp-ts-core/framework-skills/design-mcp-server/SKILL.md`. Promoting it is a framework change (versioned skill) and is deferred to a deliberate, Casey-directed step.
