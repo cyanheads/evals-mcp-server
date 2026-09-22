@@ -96,7 +96,8 @@ ARG PORT
 ENV MCP_HTTP_PORT=${PORT:-3010}
 ENV MCP_HTTP_HOST="0.0.0.0"
 ENV MCP_TRANSPORT_TYPE="http"
-ENV MCP_SESSION_MODE="stateless"
+# stateful is required: src/index.ts refuses a stateless HTTP start (evals_submit_draft's confirmation needs a live session)
+ENV MCP_SESSION_MODE="stateful"
 ENV MCP_LOG_LEVEL="info"
 ENV LOGS_DIR="/var/log/evals-mcp-server"
 ENV MCP_FORCE_CONSOLE_LOGGING="true"

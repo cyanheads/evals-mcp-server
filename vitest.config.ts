@@ -26,6 +26,17 @@ export default mergeConfig(
             exclude: ['tests/smoke/**', 'tests/integration/**', 'tests/fuzz/**'],
           },
         },
+        // Spawns the real server process; serialized so boots never contend.
+        {
+          extends: true,
+          test: {
+            name: 'integration',
+            include: ['tests/integration/**/*.test.ts'],
+            maxWorkers: 1,
+            testTimeout: 30_000,
+            hookTimeout: 30_000,
+          },
+        },
         // Add more projects as your suite grows. Each inherits the framework's
         // base config (environment, pool, coverage) and can override freely.
         //
@@ -42,15 +53,6 @@ export default mergeConfig(
         //     name: 'fuzz',
         //     include: ['tests/fuzz/**/*.test.ts'],
         //     testTimeout: 15_000,
-        //   },
-        // },
-        // {
-        //   extends: true,
-        //   test: {
-        //     name: 'integration',
-        //     include: ['tests/integration/**/*.test.ts'],
-        //     maxWorkers: 1,
-        //     testTimeout: 30_000,
         //   },
         // },
       ],
