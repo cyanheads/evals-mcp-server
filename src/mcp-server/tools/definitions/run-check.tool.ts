@@ -66,6 +66,7 @@ export const runCheckTool = tool('evals_run_check', {
       when: 'The grader spec cannot run (malformed math.js target, invalid regex, missing json_match reference, or llm_rubric).',
       recovery:
         'Fix the named grader field — correct the math.js expression, regex pattern, or supply expected/schema — then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'mcq_choice_mismatch',
@@ -73,6 +74,7 @@ export const runCheckTool = tool('evals_run_check', {
       when: 'The mcq grader correct answer is not one of the supplied choices.',
       recovery:
         'Set grader.correct to one of the choices, or correct the choices array, then retry.',
+      thrownBy: 'service',
     },
   ],
 

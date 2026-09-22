@@ -34,12 +34,14 @@ export const discardDraftTool = tool('evals_discard_draft', {
       code: JsonRpcErrorCode.NotFound,
       when: 'No draft exists with the given id (never created, or already discarded).',
       recovery: 'Use evals_list_records with status=draft to find a valid draft id, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'record_frozen',
       code: JsonRpcErrorCode.ValidationError,
       when: 'The id refers to a submitted (frozen) record, which cannot be discarded.',
       recovery: 'Submitted records are permanent; there is nothing to discard.',
+      thrownBy: 'service',
     },
   ],
 

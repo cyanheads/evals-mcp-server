@@ -78,6 +78,7 @@ export const reviseDraftTool = tool('evals_revise_draft', {
       code: JsonRpcErrorCode.NotFound,
       when: 'No record exists with the given draft id.',
       recovery: 'Use evals_list_records to find a valid draft id, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'record_frozen',
@@ -92,18 +93,21 @@ export const reviseDraftTool = tool('evals_revise_draft', {
       when: 'A set/unset path does not resolve, an append targets a non-array, or a protected field (task_type, id, checksum) was targeted.',
       recovery:
         'Use a path that resolves against the record shape; do not target task_type or server-owned fields.',
+      thrownBy: 'service',
     },
     {
       reason: 'task_type_constraint',
       code: JsonRpcErrorCode.ValidationError,
       when: 'The patch left the record violating a per-task-type rule (mcq without choices; free_response without llm_rubric grader).',
       recovery: 'Adjust choices/grader so the task-type constraint holds, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'mcq_choice_mismatch',
       code: JsonRpcErrorCode.ValidationError,
       when: 'After the patch, the mcq grader correct answer is not one of the choices.',
       recovery: 'Set grader.correct to one of the choices, or fix the choices array, then retry.',
+      thrownBy: 'service',
     },
   ],
 

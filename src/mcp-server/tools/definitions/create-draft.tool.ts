@@ -110,6 +110,7 @@ export const createDraftTool = tool('evals_create_draft', {
       when: 'The grader spec cannot run against the gold (malformed math.js target, invalid regex, missing json_match reference).',
       recovery:
         'Fix the named grader field — correct the expression, pattern, or supply expected/schema — then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'task_type_constraint',
@@ -117,12 +118,14 @@ export const createDraftTool = tool('evals_create_draft', {
       when: 'A per-task-type rule is violated (mcq without choices; free_response without an llm_rubric grader).',
       recovery:
         'Add the missing field — provide choices for mcq, or an llm_rubric grader for free_response — then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'mcq_choice_mismatch',
       code: JsonRpcErrorCode.ValidationError,
       when: 'The mcq grader correct answer is not one of the choices.',
       recovery: 'Set grader.correct to one of the choices, or fix the choices array, then retry.',
+      thrownBy: 'service',
     },
   ],
 

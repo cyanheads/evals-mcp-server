@@ -127,7 +127,12 @@ describe('evals_submit_draft — capture resolution', () => {
     });
     await expect(
       submitDraftTool.handler(submitDraftTool.input.parse({ draft_id: id }), submitCtx),
-    ).rejects.toMatchObject({ data: { reason: 'verification_disagrees_with_gold' } });
+    ).rejects.toMatchObject({
+      data: {
+        reason: 'verification_disagrees_with_gold',
+        recovery: { hint: expect.stringContaining('Reconcile the gold') },
+      },
+    });
   });
 
   it('submits when the captured value agrees, embedding the dump and lifting a source citation', async () => {

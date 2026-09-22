@@ -31,6 +31,7 @@ export const getRecordTool = tool('evals_get_record', {
       when: 'No record exists with the given id.',
       recovery:
         'Use evals_list_records to browse existing record ids, then retry with a valid one.',
+      thrownBy: 'service',
     },
   ],
 

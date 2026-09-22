@@ -125,6 +125,7 @@ export const submitDraftTool = tool('evals_submit_draft', {
       code: JsonRpcErrorCode.NotFound,
       when: 'No record exists with the given draft id.',
       recovery: 'Use evals_list_records to find a valid draft id, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'record_frozen',
@@ -139,12 +140,14 @@ export const submitDraftTool = tool('evals_submit_draft', {
       when: 'No recorded independent verification (no subagent report and no author decorrelated check).',
       recovery:
         'Append a subagent report or your own decorrelated check to verification.evidence, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'grader_failed_on_gold',
       code: JsonRpcErrorCode.ValidationError,
       when: 'The declared grader, run against the declared gold, did not return PASS.',
       recovery: 'Fix the gold so it passes its grader, or fix the grader spec, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'verification_disagrees_with_gold',
@@ -158,6 +161,7 @@ export const submitDraftTool = tool('evals_submit_draft', {
       code: JsonRpcErrorCode.ValidationError,
       when: 'discrimination.negative is empty — nothing proves the grader rejects a wrong answer.',
       recovery: 'Add at least one known-wrong negative case via evals_revise_draft, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'negative_case_passed',
@@ -165,18 +169,21 @@ export const submitDraftTool = tool('evals_submit_draft', {
       when: 'A declared negative case passed the grader when it should be rejected.',
       recovery:
         'Tighten the grader or fix the negative case so the wrong answer is rejected, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'duplicate',
       code: JsonRpcErrorCode.ValidationError,
       when: 'A submitted record with the same content_hash already exists.',
       recovery: 'Discard this draft or change the task content so it is not a duplicate.',
+      thrownBy: 'service',
     },
     {
       reason: 'decorrelation_violation',
       code: JsonRpcErrorCode.ValidationError,
       when: 'The recorded verification path is the same as the generation path (no genuine independence).',
       recovery: 'Verify the gold by a method different from how it was generated, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'capture_unresolved',
@@ -184,6 +191,7 @@ export const submitDraftTool = tool('evals_submit_draft', {
       when: 'A captures EvalsID has no file in EVALS_CAPTURE_DIR (only when capture is enabled).',
       recovery:
         'Re-run the source tool to regenerate the capture, or remove the id from captures, then retry.',
+      thrownBy: 'service',
     },
     {
       reason: 'submit_declined',
@@ -256,6 +264,7 @@ export const submitDraftTool = tool('evals_submit_draft', {
               'verification_disagrees_with_gold',
               `The captured source value from ${cap.server} disagrees with the gold under the grader. Fix the gold to match the authoritative captured value.`,
               {
+                ...ctx.recoveryFor('verification_disagrees_with_gold'),
                 captured: sc,
                 gold: withCaptures.gold,
                 server: cap.server,

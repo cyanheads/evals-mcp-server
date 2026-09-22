@@ -1,9 +1,10 @@
 /**
  * @fileoverview Tests for server-config — EVALS_DATA_DIR resolution. The bare-npx
- * default (`./evals-data`) must apply both when the env var is unset and when it
- * is blank: the `.mcpb` bundle passes `""` (not undefined) for an empty Desktop
- * directory field, so `.min(1)` alone would crash startup. An explicit value is
- * preserved verbatim.
+ * default (`./evals-data`) must apply when the env var is unset, blank, or an
+ * unsubstituted placeholder: the `.mcpb` bundle passes `""` (not undefined) for an
+ * empty Desktop directory field, and a host that substitutes nothing forwards the
+ * literal `${user_config.…}` text, so `.min(1)` alone would crash startup. An
+ * explicit value is preserved verbatim.
  * @module tests/config/server-config.test
  */
 
@@ -39,6 +40,12 @@ describe('server-config — EVALS_DATA_DIR default', () => {
 
   it('treats a whitespace-only EVALS_DATA_DIR as blank and defaults', () => {
     process.env[KEY] = '   ';
+    resetServerConfig();
+    expect(getServerConfig().dataDir).toBe('./evals-data');
+  });
+
+  it('defaults when EVALS_DATA_DIR is an unsubstituted user_config placeholder', () => {
+    process.env[KEY] = `\${user_config.evals_data_dir}`;
     resetServerConfig();
     expect(getServerConfig().dataDir).toBe('./evals-data');
   });

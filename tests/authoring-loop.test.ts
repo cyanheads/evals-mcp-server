@@ -4,7 +4,7 @@
  * submit_draft → get_record/list_records → export_records, plus the submit-gate
  * refusals (wrong gold, missing negative, no verification, decorrelation,
  * duplicate) and discard. Drives the actual tool handlers with a mock context.
- * @module tests/integration/authoring-loop.test
+ * @module tests/authoring-loop.test
  */
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises';

@@ -21,9 +21,11 @@
 
 ---
 
-## Tools
+## Overview
 
-Nine tools for authoring eval records — the draft loop (create, revise, discard, submit), the standalone deterministic checker, and read/list/export:
+Verifiable eval records, authored through a draft → review → surgical-revise → submit loop with server-enforced graders. Create a draft carrying its own executable grader, patch it surgically field by field, and submit through a committability gate that requires the gold to pass, a declared negative case to fail, and an independent verification to agree — then compile submitted records to JSONL, CSV, Inspect AI, or lm-evaluation-harness. Runs as a stdio process or a local Streamable HTTP server.
+
+### Tools
 
 | Tool | Description |
 |:---|:---|
@@ -37,106 +39,124 @@ Nine tools for authoring eval records — the draft loop (create, revise, discar
 | `evals_list_records` | Browse and filter records by status, domain, task type, or tag. Returns a compact summary per record. |
 | `evals_export_records` | Compile submitted records to JSONL, CSV, Inspect AI, or lm-evaluation-harness and write the artifact under `exports/`. |
 
-### `evals_describe_schema`
+### Resources
 
-Return what a record of a given `task_type` needs before you draft it.
-
-- Static — derived from the record and grader Zod schemas, no disk or runtime state
-- Per-type gold shape, appropriate grader kind(s), required/optional fields, and authoring notes
-- `task_type` is one of `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
-
----
-
-### `evals_create_draft`
-
-Create and persist a draft eval record, then reflect it back as a review forcing function.
-
-- Validates against the `task_type` discriminated union (per-type rules: `mcq` requires `choices`; `free_response` requires an `llm_rubric` grader)
-- Runs a cheap self-consistency check — grader vs gold and each positive must PASS, vs each negative must REJECT
-- Returns the normalized record parroted back behind a divider, a per-field review protocol, a ready-to-paste verification subagent prompt, and what's still required before submit
-- Optional draft-time `verification` block and `captures` (EvalsIDs) when you already hold provenance
-- Stays `draft` — passing self-consistency proves the grader discriminates, not that the gold is right
-
----
-
-### `evals_revise_draft`
-
-Surgically patch a draft so each change stays legible.
-
-- Explicit `set` (dotted-path → value), `append` (dotted-path → array items), and `unset` (dotted paths) operations — not full-record rewrites
-- Returns the updated record, an itemized list of what changed, and a re-run self-consistency verdict
-- Re-validates the full shape and cross-field constraints after the patch
-- Draft-only — submitted records are frozen; `task_type` cannot be patched (start a new draft to change the discriminant)
-
----
-
-### `evals_run_check`
-
-Run a grader against one or more candidates without touching a saved record.
-
-- PASS/REJECT per candidate plus the resolved comparison value (e.g. the math.js-evaluated numeric target), so you see why each matched or missed
-- `candidates` accepts strings, numbers, objects, or arrays — whatever the grader kind expects
-- Supply `gold` for gold-relative kinds (`exact_match`); it is a no-op for target-embedding kinds like `numeric` and `mcq`
-- `llm_rubric` cannot run on this server — submission relies on recorded independent verification
-
----
-
-### `evals_submit_draft`
-
-Finalize a draft through the committability gate, then freeze it.
-
-- The gate runs the grader against the gold (must PASS), requires ≥1 declared negative case to be REJECTED, and requires a recorded, decorrelated independent verification that agrees with the gold
-- Resolves and embeds any `captures` from `EVALS_CAPTURE_DIR`, cross-checking the gold against the authoritative captured value
-- Rejects duplicates (same `content_hash` already submitted)
-- On pass, flips the record to `submitted`, stamps `submitted_at` and a `checksum`, and freezes it; otherwise refuses with a typed error and the record stays a draft
-- `free_response` `llm_rubric` is admitted on recorded independent verification and flagged `server_verified: false`
-
----
-
-### `evals_export_records`
-
-Compile submitted records to a downstream eval format.
-
-- `jsonl` (lossless, the lingua franca), `csv` (a flattened, lossy spreadsheet summary), `inspect` (UK AISI Inspect AI), `lm-eval` (EleutherAI lm-evaluation-harness)
-- Optional `domain` / `task_type` / `tag` filter
-- Only submitted records are exported — drafts are skipped
-- Writes the artifact under `exports/` and returns the file path, record count, byte size, and a short preview instead of dumping inline
-
-## Resource
-
-| Type | Name | Description |
-|:---|:---|:---|
-| Resource | `eval://record/{id}` | A single draft or submitted record by id — the same payload `evals_get_record` returns, for resource-capable clients. |
+| Resource | Description |
+|:---|:---|
+| `eval://record/{id}` | A single draft or submitted record by id — the same payload `evals_get_record` returns, for resource-capable clients. |
 
 All record data is also reachable through the tool surface — `evals_get_record` for a single record, `evals_list_records` to browse. The resource is a convenience mirror for clients that support resources, not the access path.
 
+## Capability reference
+
+### `evals_describe_schema` <sub>tool</sub>
+
+- Static — derived from the record and grader Zod schemas, no disk or runtime state
+- `task_type` is one of `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
+- Returns the gold shape, applicable grader kind(s), required/optional fields, and per-type authoring notes (e.g. `mcq` needs `choices`, `free_response` needs an `llm_rubric` grader)
+
+---
+
+### `evals_create_draft` <sub>tool</sub>
+
+- Validates against the `task_type` discriminated union and persists the draft; `mcq` requires `choices`, `free_response` requires an `llm_rubric` grader
+- Runs a self-consistency check — the grader must PASS against `gold` and each `discrimination.positive`, and REJECT each `discrimination.negative`
+- Returns the normalized record, a per-field review protocol, a ready-to-paste verification-subagent prompt, and what's still required before submit
+- Accepts optional draft-time `verification` evidence and `captures` (EvalsIDs) when provenance is already in hand
+- Typed errors: `grader_unexecutable`, `task_type_constraint`, `mcq_choice_mismatch`
+- Stays `draft` — passing self-consistency proves the grader discriminates, not that the gold is correct
+
+---
+
+### `evals_get_record` <sub>tool</sub>
+
+- Reads by `id`, stable across submit — resolves whether the record is still a draft or already submitted
+- Returns the full record, including its grader, discrimination cases, and verification evidence
+- `not_found` when no record matches; recovery points to `evals_list_records`
+
+---
+
+### `evals_revise_draft` <sub>tool</sub>
+
+- Explicit `set` (dotted-path → value), `append` (dotted-path → array items), and `unset` (dotted paths) operations — never a full-record rewrite
+- Cannot target `task_type` or server-owned fields — start a new draft to change the discriminant
+- Re-validates the full record shape and per-task-type constraints after the patch, and re-runs self-consistency since the grader may have moved
+- Returns the updated record and an itemized `changed` list (op, path, before, after)
+- Draft-only — `record_frozen` on a submitted id
+- Typed errors: `not_found`, `record_frozen`, `invalid_patch_path`, `task_type_constraint`, `mcq_choice_mismatch`
+
+---
+
+### `evals_discard_draft` <sub>tool</sub>
+
+- Deletes a draft record by `draft_id`
+- Draft-only — `record_frozen` when the id refers to a submitted record
+- A missing id reports `not_found` rather than a distinct "already discarded" error — effectively idempotent
+
+---
+
+### `evals_run_check` <sub>tool</sub>
+
+- Runs a grader spec against one or more `candidates` (strings, numbers, objects, or arrays) without touching a saved record
+- Returns PASS/REJECT and a `detail` per candidate, plus the `resolved` comparison value (e.g. the math.js-evaluated numeric target)
+- `gold` applies only to gold-relative kinds (`exact_match`); it's a no-op for target-embedding kinds like `numeric` and `mcq`
+- `llm_rubric` cannot run here — submission relies on recorded independent verification instead
+- Typed errors: `grader_unexecutable`, `mcq_choice_mismatch`
+
+---
+
+### `evals_submit_draft` <sub>tool</sub>
+
+- The committability gate: the gold must PASS its grader, ≥1 declared negative must be REJECTED, and a recorded, decorrelated independent verification must agree with the gold
+- Resolves and embeds any `captures` from `EVALS_CAPTURE_DIR`, cross-checking the gold against the authoritative captured value
+- Rejects duplicates by `content_hash`; `confirm` (or `EVALS_REQUIRE_CONFIRMATION`) can require human confirmation through multi-round input before finalizing
+- On pass, flips the record to `submitted`, stamps `submitted_at` and a `checksum`, and freezes it; otherwise refuses and the record stays a draft
+- `free_response` is admitted on recorded independent verification alone and flagged `server_verified: false`
+- Typed errors: `not_found`, `record_frozen`, `verification_incomplete`, `grader_failed_on_gold`, `verification_disagrees_with_gold`, `missing_negative_case`, `negative_case_passed`, `duplicate`, `decorrelation_violation`, `capture_unresolved`, `submit_declined`
+
+---
+
+### `evals_list_records` <sub>tool</sub>
+
+- Filters by `status` (draft/submitted), `domain`, `task_type`, or `tag`; up to 500 per call (default 50)
+- Returns a compact summary per record (id, status, task_type, domain, tags, timestamps), newest-first — not full records
+- Discloses truncation (`shown`, `cap`, total count) when the limit is hit, so a partial set is never mistaken for the whole corpus
+
+---
+
+### `evals_export_records` <sub>tool</sub>
+
+- Formats: `jsonl` (lossless), `csv` (flattened, lossy summary), `inspect` (UK AISI Inspect AI), `lm-eval` (EleutherAI lm-evaluation-harness)
+- Optional `domain` / `task_type` / `tag` filter
+- Only `submitted` records are exported — drafts are skipped
+- Writes the artifact under `exports/` and returns its path, record count, byte size, and a short preview instead of dumping it inline
+
+---
+
+### `eval://record/{id}` <sub>resource</sub>
+
+- Returns the same payload as `evals_get_record`, as `application/json`
+- `id` comes from `evals_list_records` or a draft/submit response
+- `not_found` when no record matches
+
 ## Features
 
-Built on [`@cyanheads/mcp-ts-core`](https://www.npmjs.com/package/@cyanheads/mcp-ts-core):
-
-- Declarative tool and resource definitions — single file per primitive, framework handles registration and validation
-- Unified error handling — handlers throw, framework catches, classifies, and formats
-- Typed error contracts — tools declare their domain failures (`reason` + recovery), surfaced to the agent
-- Pluggable auth: `none`, `jwt`, `oauth`
-- Structured logging with optional OpenTelemetry tracing
-- STDIO and Streamable HTTP transports
+Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): stdio and Streamable HTTP transports, pluggable auth (`none` / `jwt` / `oauth`), swappable storage (`in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`), structured logging with optional OpenTelemetry tracing.
 
 Eval authoring:
 
-- A `draft → review → surgical-revise → submit` loop, with the server acting as both scribe (normalize, persist, compile) and adversarial checker (run the record's own grader, reject what doesn't hold up)
-- Records are a Zod `discriminatedUnion` keyed on `task_type` — `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
+- A `draft → review → surgical-revise → submit` loop, with the server acting as both scribe (normalize, persist, compile) and adversarial checker (runs the record's own grader, rejects what doesn't hold up)
+- Records are a Zod `discriminatedUnion` on `task_type` — `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
 - A typed grader DSL serialized with each record — deterministic kinds (`numeric` via math.js, `exact_match`, `set_match`, `regex`, `mcq`, `json_match`) run server-side; `llm_rubric` relies on recorded independent verification
 - An enforced committability gate at submit: the gold must pass its own grader, ≥1 negative must be rejected, and a recorded decorrelated verification must agree with the gold
-- Optional fleet grounding via the `captures` EvalsID field — link framework-written tool-call dumps, resolved from `EVALS_CAPTURE_DIR` and cross-checked against the gold (no server-to-server calls)
-- Plain JSON files under `EVALS_DATA_DIR` — inspectable, diffable, version-controllable records
-- Compile to JSONL, CSV, Inspect AI, and lm-evaluation-harness formats
+- Plain JSON files under `EVALS_DATA_DIR` — inspectable, diffable, version-controllable records, with drafts, submitted records, and exports kept separate
 
 Agent-friendly output:
 
-- The two instructional tools (`evals_create_draft`, `evals_revise_draft`) carry the loop's review mechanism in their responses — the parsed record parroted back, a per-field review protocol, and a ready subagent prompt
-- Self-consistency verdicts on every draft and revise — per-positive and per-negative results, not just a boolean
-- `evals_list_records` discloses truncation when the limit is hit, so a partial set is never mistaken for the whole corpus
-- The submit gate refuses with a typed `reason` + recovery hint, so a rejected record tells the agent exactly what to fix
+- Instructional responses — `evals_create_draft` and `evals_revise_draft` return the parsed record parroted back, a per-field review protocol, and a ready-to-paste verification-subagent prompt
+- Self-consistency verdicts — every draft/revise response reports per-positive and per-negative pass/reject results, not just a boolean
+- Truncation disclosure — `evals_list_records` reports `shown` / `cap` / total count when the limit is hit, so a partial set is never mistaken for the whole corpus
+- Typed refusal — the submit gate fails with a typed `reason` plus a recovery hint, so a rejected record tells the agent exactly what to fix
 
 ## Getting started
 
@@ -249,6 +269,7 @@ All server configuration is validated at startup via Zod schemas in `src/config/
 | `EVALS_CAPTURE_DIR` | Directory of framework-written tool-call captures; when set, `captures` EvalsIDs resolve to full dumps. | — |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for the HTTP server. | `3010` |
+| `MCP_SESSION_MODE` | HTTP session mode: `auto`, `stateful`, or `stateless` (`auto` resolves to `stateful`). A `stateless` HTTP start is refused, since a 2025-era client can answer the `evals_submit_draft` confirmation only over a live session. No effect on stdio. | `stateful` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
 | `OTEL_ENABLED` | Enable [OpenTelemetry instrumentation](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry). | `false` |
@@ -286,7 +307,7 @@ docker build -t evals-mcp-server .
 docker run --rm -e MCP_TRANSPORT_TYPE=stdio -e EVALS_DATA_DIR=/data -v evals-data:/data evals-mcp-server
 ```
 
-The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `/var/log/evals-mcp-server`. OpenTelemetry peer dependencies are installed by default — build with `--build-arg OTEL_ENABLED=false` to omit them.
+The Dockerfile defaults to HTTP transport, stateful session mode, and logs to `/var/log/evals-mcp-server`. OpenTelemetry peer dependencies are installed by default — build with `--build-arg OTEL_ENABLED=false` to omit them.
 
 ## Project structure
 
@@ -313,7 +334,7 @@ See [`CLAUDE.md`/`AGENTS.md`](./CLAUDE.md) for development guidelines and archit
 
 ## Contributing
 
-Issues and pull requests are welcome. Run checks and tests before submitting:
+Issues are welcome. Run checks and tests before submitting:
 
 ```sh
 bun run devcheck

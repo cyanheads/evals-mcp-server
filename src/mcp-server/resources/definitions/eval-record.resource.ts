@@ -39,6 +39,7 @@ export const evalRecordResource = resource('eval://record/{id}', {
       code: JsonRpcErrorCode.NotFound,
       when: 'No record exists with the given id.',
       recovery: 'Use evals_list_records to browse valid record ids, then retry.',
+      thrownBy: 'service',
     },
   ],
 
