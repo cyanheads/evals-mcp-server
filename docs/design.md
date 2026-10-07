@@ -240,7 +240,7 @@ The only notable runtime dependency is **math.js** (numeric grading), same as `c
 
 | Env Var | Required | Description |
 |:--------|:---------|:------------|
-| `EVALS_DATA_DIR` | yes | Root folder for record JSON. The store manages `drafts/`, `submitted/`, and `exports/` subdirs under it. |
+| `EVALS_DATA_DIR` | no (default `./evals-data`) | Root folder for record JSON. The store manages `drafts/`, `submitted/`, and `exports/` subdirs under it. |
 | `EVALS_REQUIRE_CONFIRMATION` | no (default `false`) | When `true`, `evals_submit_draft` requests human confirmation before finalizing. Off by default — per-record confirmation would kill batch authoring; the natural human checkpoint is `evals_export_records`. |
 | `EVALS_DEFAULT_LICENSE` | no | Default `metadata.license` applied when a draft omits one. |
 | `EVALS_CAPTURE_DIR` | no | Directory of framework-written tool-call captures (see [Provenance capture](#provenance-capture-evalsid)). Set it to the same path the fleet servers write to; when set, `captures` EvalsIDs resolve to full dumps. |

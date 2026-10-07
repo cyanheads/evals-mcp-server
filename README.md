@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -51,93 +51,75 @@ All record data is also reachable through the tool surface — `evals_get_record
 
 ### `evals_describe_schema` <sub>tool</sub>
 
-- Static — derived from the record and grader Zod schemas, no disk or runtime state
-- `task_type` is one of `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
-- Returns the gold shape, applicable grader kind(s), required/optional fields, and per-type authoring notes (e.g. `mcq` needs `choices`, `free_response` needs an `llm_rubric` grader)
+- Accepts `task_type`: `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, or `free_response`.
+- Returns the gold shape, grader kinds, required/optional fields, and authoring notes from static schemas; `mcq` requires `choices`, and `free_response` requires `llm_rubric`.
 
 ---
 
 ### `evals_create_draft` <sub>tool</sub>
 
-- Validates against the `task_type` discriminated union and persists the draft; `mcq` requires `choices`, `free_response` requires an `llm_rubric` grader
-- Runs a self-consistency check — the grader must PASS against `gold` and each `discrimination.positive`, and REJECT each `discrimination.negative`
-- Returns the normalized record, a per-field review protocol, a ready-to-paste verification-subagent prompt, and what's still required before submit
-- Accepts optional draft-time `verification` evidence and `captures` (EvalsIDs) when provenance is already in hand
-- Typed errors: `grader_unexecutable`, `task_type_constraint`, `mcq_choice_mismatch`
-- Stays `draft` — passing self-consistency proves the grader discriminates, not that the gold is correct
+- Accepts a record with its grader and discrimination cases, plus optional `verification` and `captures` (EvalsIDs); `mcq` requires `choices`, and `free_response` requires `llm_rubric`.
+- Persists as `draft` and returns the normalized record, review protocol, verification-subagent prompt, and remaining submit requirements. Self-consistency checks `gold` and positives for PASS and negatives for REJECT; independent verification is still required before submit.
+- Typed errors: `grader_unexecutable`, `task_type_constraint`, `mcq_choice_mismatch`.
 
 ---
 
 ### `evals_get_record` <sub>tool</sub>
 
-- Reads by `id`, stable across submit — resolves whether the record is still a draft or already submitted
-- Returns the full record, including its grader, discrimination cases, and verification evidence
-- `not_found` when no record matches; recovery points to `evals_list_records`
+- Reads a draft or submitted record by `id`, which stays stable across submit.
+- Returns the full grader, discrimination cases, and verification evidence; `not_found` points to `evals_list_records`.
 
 ---
 
 ### `evals_revise_draft` <sub>tool</sub>
 
-- Explicit `set` (dotted-path → value), `append` (dotted-path → array items), and `unset` (dotted paths) operations — never a full-record rewrite
-- Cannot target `task_type` or server-owned fields — start a new draft to change the discriminant
-- Re-validates the full record shape and per-task-type constraints after the patch, and re-runs self-consistency since the grader may have moved
-- Returns the updated record and an itemized `changed` list (op, path, before, after)
-- Draft-only — `record_frozen` on a submitted id
-- Typed errors: `not_found`, `record_frozen`, `invalid_patch_path`, `task_type_constraint`, `mcq_choice_mismatch`
+- Applies `set`, `append`, and `unset` by dotted path to a draft; `task_type` and server-owned fields cannot be changed.
+- Re-validates the record and task-type constraints, re-runs self-consistency, and returns the record plus `changed` entries (`op`, `path`, `before`, `after`).
+- Typed errors: `not_found`, `record_frozen` for a submitted id, `invalid_patch_path`, `task_type_constraint`, `mcq_choice_mismatch`.
 
 ---
 
 ### `evals_discard_draft` <sub>tool</sub>
 
-- Deletes a draft record by `draft_id`
-- Draft-only — `record_frozen` when the id refers to a submitted record
-- A missing id reports `not_found` rather than a distinct "already discarded" error — effectively idempotent
+- Deletes a draft by `draft_id` and returns `discarded: true`.
+- A submitted record reports `record_frozen`; a missing or already discarded id reports `not_found`.
 
 ---
 
 ### `evals_run_check` <sub>tool</sub>
 
-- Runs a grader spec against one or more `candidates` (strings, numbers, objects, or arrays) without touching a saved record
-- Returns PASS/REJECT and a `detail` per candidate, plus the `resolved` comparison value (e.g. the math.js-evaluated numeric target)
-- `gold` applies only to gold-relative kinds (`exact_match`); it's a no-op for target-embedding kinds like `numeric` and `mcq`
-- `llm_rubric` cannot run here — submission relies on recorded independent verification instead
-- Typed errors: `grader_unexecutable`, `mcq_choice_mismatch`
+- Runs a grader against one or more `candidates` without a saved record; supply `gold` for `exact_match`, while target-embedding kinds such as `numeric` and `mcq` ignore it.
+- Returns PASS/REJECT, `detail`, and the `resolved` reference per candidate. `llm_rubric` is unexecutable here; submit relies on recorded independent verification.
+- Typed errors: `grader_unexecutable`, `mcq_choice_mismatch`.
 
 ---
 
 ### `evals_submit_draft` <sub>tool</sub>
 
-- The committability gate: the gold must PASS its grader, ≥1 declared negative must be REJECTED, and a recorded, decorrelated independent verification must agree with the gold
-- Resolves and embeds any `captures` from `EVALS_CAPTURE_DIR`, cross-checking the gold against the authoritative captured value
-- Rejects duplicates by `content_hash`; `confirm` (or `EVALS_REQUIRE_CONFIRMATION`) can require human confirmation through multi-round input before finalizing
-- On pass, flips the record to `submitted`, stamps `submitted_at` and a `checksum`, and freezes it; otherwise refuses and the record stays a draft
-- `free_response` is admitted on recorded independent verification alone and flagged `server_verified: false`
-- Typed errors: `not_found`, `record_frozen`, `verification_incomplete`, `grader_failed_on_gold`, `verification_disagrees_with_gold`, `missing_negative_case`, `negative_case_passed`, `duplicate`, `decorrelation_violation`, `capture_unresolved`, `submit_declined`
+- Finalizes by `draft_id`: gold must PASS, ≥1 negative must be REJECTED, and decorrelated verification must agree. Embeds and cross-checks `captures` from `EVALS_CAPTURE_DIR`, rejects duplicate `content_hash`, and optionally asks for confirmation via `confirm` or `EVALS_REQUIRE_CONFIRMATION`.
+- On success, freezes the record with `submitted_at` and `checksum` and returns `status: submitted`; a refusal leaves the draft intact. `free_response` relies on recorded verification alone with `server_verified: false`.
+- Typed errors: `not_found`, `record_frozen`, `verification_incomplete`, `grader_failed_on_gold`, `verification_disagrees_with_gold`, `missing_negative_case`, `negative_case_passed`, `duplicate`, `decorrelation_violation`, `capture_unresolved`, `submit_declined`.
 
 ---
 
 ### `evals_list_records` <sub>tool</sub>
 
-- Filters by `status` (draft/submitted), `domain`, `task_type`, or `tag`; up to 500 per call (default 50)
-- Returns a compact summary per record (id, status, task_type, domain, tags, timestamps), newest-first — not full records
-- Discloses truncation (`shown`, `cap`, total count) when the limit is hit, so a partial set is never mistaken for the whole corpus
+- Filters by `status` (draft/submitted), `domain`, `task_type`, or `tag`; `limit` defaults to 50 and allows up to 500.
+- Returns summaries (id, status, task_type, domain, tags, timestamps), newest-first, with `shown`, `cap`, `totalCount`, and `truncated`.
 
 ---
 
 ### `evals_export_records` <sub>tool</sub>
 
-- Formats: `jsonl` (lossless), `csv` (flattened, lossy summary), `inspect` (UK AISI Inspect AI), `lm-eval` (EleutherAI lm-evaluation-harness)
-- Optional `domain` / `task_type` / `tag` filter
-- Only `submitted` records are exported — drafts are skipped
-- Writes the artifact under `exports/` and returns its path, record count, byte size, and a short preview instead of dumping it inline
+- Exports `submitted` records, optionally filtered by `domain`, `task_type`, or `tag`, as `jsonl` (lossless), `csv` (lossy summary), `inspect` (Inspect AI), or `lm-eval` (lm-evaluation-harness).
+- Writes under `exports/` and returns the path, record count, byte size, and preview.
 
 ---
 
 ### `eval://record/{id}` <sub>resource</sub>
 
-- Returns the same payload as `evals_get_record`, as `application/json`
-- `id` comes from `evals_list_records` or a draft/submit response
-- `not_found` when no record matches
+- Reads `id` from `evals_list_records` or a draft/submit response.
+- Returns the `evals_get_record` payload as `application/json`, or `not_found` when no record matches.
 
 ## Features
 
@@ -149,6 +131,7 @@ Eval authoring:
 - Records are a Zod `discriminatedUnion` on `task_type` — `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
 - A typed grader DSL serialized with each record — deterministic kinds (`numeric` via math.js, `exact_match`, `set_match`, `regex`, `mcq`, `json_match`) run server-side; `llm_rubric` relies on recorded independent verification
 - An enforced committability gate at submit: the gold must pass its own grader, ≥1 negative must be rejected, and a recorded decorrelated verification must agree with the gold
+- Optional confirmation expires after 10 minutes, binds the caller and complete draft, and must be repeated if the draft changes
 - Plain JSON files under `EVALS_DATA_DIR` — inspectable, diffable, version-controllable records, with drafts, submitted records, and exports kept separate
 
 Agent-friendly output:
@@ -209,8 +192,7 @@ Or with Docker:
       "args": [
         "run", "-i", "--rm",
         "-e", "MCP_TRANSPORT_TYPE=stdio",
-        "-e", "EVALS_DATA_DIR=/data",
-        "-v", "evals-data:/data",
+        "-v", "evals-data:/usr/src/app/evals-data",
         "ghcr.io/cyanheads/evals-mcp-server:latest"
       ]
     }
@@ -276,6 +258,8 @@ All server configuration is validated at startup via Zod schemas in `src/config/
 
 See [`.env.example`](./.env.example) for the full list of optional overrides.
 
+Confirmation records use framework storage separately from the eval JSON store. For deployments where a retry can reach another instance, configure `STORAGE_PROVIDER_TYPE=filesystem` with a shared `STORAGE_FILESYSTEM_PATH`, or use `supabase` or `cloudflare-d1`; `cloudflare-kv` is unsuitable for consent because reads and deletes are eventually consistent. Set the same `MCP_REQUEST_STATE_KEY` (at least 32 bytes) on each instance to seal round-trip state. Consent redemption blocks sequential replay; concurrent retries still require serialization because framework storage has no atomic read-and-delete.
+
 ## Running the server
 
 ### Local development
@@ -304,10 +288,10 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 
 ```sh
 docker build -t evals-mcp-server .
-docker run --rm -e MCP_TRANSPORT_TYPE=stdio -e EVALS_DATA_DIR=/data -v evals-data:/data evals-mcp-server
+docker run --rm -e MCP_TRANSPORT_TYPE=stdio -v evals-data:/usr/src/app/evals-data evals-mcp-server
 ```
 
-The Dockerfile defaults to HTTP transport, stateful session mode, and logs to `/var/log/evals-mcp-server`. OpenTelemetry peer dependencies are installed by default — build with `--build-arg OTEL_ENABLED=false` to omit them.
+The Dockerfile defaults to HTTP transport, stateful session mode, and logs to `/var/log/evals-mcp-server`. Mount record storage at `/usr/src/app/evals-data`, the default directory owned by the runtime user. OpenTelemetry peer dependencies are installed by default — build with `--build-arg OTEL_ENABLED=false` to omit them.
 
 ## Project structure
 
