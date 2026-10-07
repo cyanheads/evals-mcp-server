@@ -10,6 +10,8 @@
  * @module mcp-server/tools/definitions/submit-draft.tool
  */
 
+import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { type Context, inputRequired, tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, validationError } from '@cyanheads/mcp-ts-core/errors';
 import { getServerConfig } from '@/config/server-config.js';
@@ -69,6 +71,14 @@ async function resolveCaptures(record: EvalRecord, ctx: Context): Promise<EvalRe
 
 const SubmitConfirmationSchema = z.object({
   confirm: z.boolean().describe('Confirm that the eval record should be finalized and frozen.'),
+});
+
+const SubmitConsentSchema = z.object({
+  operation: z.string().describe('Operation the confirmation authorizes.'),
+  clientId: z.string().describe('Authenticated client that was asked, empty without auth.'),
+  subject: z.string().describe('Authenticated subject that was asked, empty without auth.'),
+  target: z.string().describe('Draft id the user was asked to finalize.'),
+  contentHash: z.string().describe('SHA-256 of the full draft when confirmation was requested.'),
 });
 
 export const submitDraftTool = tool('evals_submit_draft', {
@@ -202,32 +212,44 @@ export const submitDraftTool = tool('evals_submit_draft', {
   ],
 
   async handler(input, ctx) {
+    const consentId = ctx.inputs.state();
+    const consent =
+      consentId && /^[0-9a-f-]{36}$/.test(consentId)
+        ? await ctx.state.get(`consent/${consentId}`, SubmitConsentSchema)
+        : null;
+    if (consent) await ctx.state.delete(`consent/${consentId}`);
+
     const store = getRecordStoreService();
     const cfg = getServerConfig();
     const existing = await store.require(input.draft_id);
     if (existing.status === 'submitted') {
-      throw ctx.fail('record_frozen', `Record "${input.draft_id}" is already submitted.`, {
-        ...ctx.recoveryFor('record_frozen'),
-      });
+      throw ctx.fail('record_frozen', `Record "${input.draft_id}" is already submitted.`);
     }
 
-    // Optional human confirmation before finalize. A declined or cancelled response is
-    // terminal; re-requesting it would loop until the client's round budget is exhausted.
+    /** Consent authorizes this caller and the entire current draft, including verification. */
     if (cfg.requireConfirmation || input.confirm) {
+      const expected = {
+        operation: 'evals_submit_draft' as const,
+        clientId: ctx.auth?.clientId ?? '',
+        subject: ctx.auth?.sub ?? '',
+        target: existing.id,
+        contentHash: createHash('sha256').update(JSON.stringify(existing)).digest('hex'),
+      };
+      const matches = consent !== null && isDeepStrictEqual(consent, expected);
       const response = ctx.inputs.view('submit_confirmation');
-      if (response.kind === 'elicit' && response.action !== 'accept') {
-        throw ctx.fail('submit_declined', 'Submission was not confirmed.', {
-          ...ctx.recoveryFor('submit_declined'),
-        });
+      if (matches && response.kind === 'elicit' && response.action !== 'accept') {
+        throw ctx.fail('submit_declined', 'Submission was not confirmed.');
       }
 
-      const confirmation = ctx.inputs.accepted('submit_confirmation', SubmitConfirmationSchema);
-      if (response.kind === 'elicit' && !confirmation) {
-        throw ctx.fail('submit_declined', 'Submission confirmation was invalid.', {
-          ...ctx.recoveryFor('submit_declined'),
-        });
+      const confirmation = matches
+        ? ctx.inputs.accepted('submit_confirmation', SubmitConfirmationSchema)
+        : undefined;
+      if (matches && response.kind === 'elicit' && !confirmation) {
+        throw ctx.fail('submit_declined', 'Submission confirmation was invalid.');
       }
       if (!confirmation) {
+        const freshId = randomUUID();
+        await ctx.state.set(`consent/${freshId}`, expected, { ttl: 600 });
         return ctx.requestInput({
           inputRequests: {
             submit_confirmation: inputRequired.elicit({
@@ -235,12 +257,11 @@ export const submitDraftTool = tool('evals_submit_draft', {
               requestedSchema: SubmitConfirmationSchema,
             }),
           },
+          requestState: freshId,
         });
       }
       if (!confirmation.confirm) {
-        throw ctx.fail('submit_declined', 'Submission was not confirmed.', {
-          ...ctx.recoveryFor('submit_declined'),
-        });
+        throw ctx.fail('submit_declined', 'Submission was not confirmed.');
       }
     }
 
@@ -279,7 +300,6 @@ export const submitDraftTool = tool('evals_submit_draft', {
     const gate = await runSubmitGate(withCaptures, store);
     if (!gate.ok) {
       throw ctx.fail(gate.failure.reason, gate.failure.message, {
-        ...ctx.recoveryFor(gate.failure.reason),
         ...gate.failure.data,
       });
     }

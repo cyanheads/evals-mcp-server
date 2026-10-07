@@ -307,9 +307,8 @@ describe('submit confirmation', () => {
     );
     const input = submitDraftTool.input.parse({ draft_id: created.draft_id, confirm: true });
 
-    const requested = await expectInputRequired(() =>
-      submitDraftTool.handler(input, createMockContext({ errors: submitDraftTool.errors })),
-    );
+    const firstCtx = createMockContext({ errors: submitDraftTool.errors });
+    const requested = await expectInputRequired(() => submitDraftTool.handler(input, firstCtx));
     expect(requested.inputRequests).toHaveProperty('submit_confirmation');
     expect(
       (await getRecordTool.handler(getRecordTool.input.parse({ id: created.draft_id }), getCtx))
@@ -318,10 +317,15 @@ describe('submit confirmation', () => {
 
     const acceptedCtx = createMockContext({
       errors: submitDraftTool.errors,
+      requestState: requested.requestState,
       inputResponses: {
         submit_confirmation: { action: 'accept', content: { confirm: true } },
       },
     });
+    await acceptedCtx.state.set(
+      `consent/${requested.requestState}`,
+      await firstCtx.state.get(`consent/${requested.requestState}`),
+    );
     const submitted = await submitDraftTool.handler(input, acceptedCtx);
 
     expect(submitted.status).toBe('submitted');
@@ -341,10 +345,17 @@ describe('submit confirmation', () => {
       createCtx,
     );
     const input = submitDraftTool.input.parse({ draft_id: created.draft_id, confirm: true });
+    const firstCtx = createMockContext({ errors: submitDraftTool.errors });
+    const requested = await expectInputRequired(() => submitDraftTool.handler(input, firstCtx));
     const declinedCtx = createMockContext({
       errors: submitDraftTool.errors,
+      requestState: requested.requestState,
       inputResponses: { submit_confirmation: { action: 'decline' } },
     });
+    await declinedCtx.state.set(
+      `consent/${requested.requestState}`,
+      await firstCtx.state.get(`consent/${requested.requestState}`),
+    );
 
     await expect(submitDraftTool.handler(input, declinedCtx)).rejects.toMatchObject({
       data: { reason: 'submit_declined' },
@@ -368,10 +379,17 @@ describe('submit confirmation', () => {
       createCtx,
     );
     const input = submitDraftTool.input.parse({ draft_id: created.draft_id, confirm: true });
+    const firstCtx = createMockContext({ errors: submitDraftTool.errors });
+    const requested = await expectInputRequired(() => submitDraftTool.handler(input, firstCtx));
     const invalidCtx = createMockContext({
       errors: submitDraftTool.errors,
+      requestState: requested.requestState,
       inputResponses: { submit_confirmation: { action: 'accept', content: {} } },
     });
+    await invalidCtx.state.set(
+      `consent/${requested.requestState}`,
+      await firstCtx.state.get(`consent/${requested.requestState}`),
+    );
 
     await expect(submitDraftTool.handler(input, invalidCtx)).rejects.toMatchObject({
       data: { reason: 'submit_declined' },

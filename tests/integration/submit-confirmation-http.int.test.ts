@@ -270,6 +270,14 @@ describe.each([
       frozen: true,
       grader_run: { gold: 'PASS', server_verified: true },
     });
+    expect(exchange.result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining(`${draftId} is now submitted`),
+        }),
+      ]),
+    );
     expect(await recordStatus(session, draftId)).toBe('submitted');
   });
 
@@ -293,12 +301,21 @@ describe.each([
     expect(exchange.result.isError).toBe(true);
     expect(exchange.result.structuredContent).toMatchObject({
       error: {
+        code: -32007,
         data: {
           reason: 'submit_declined',
           recovery: { hint: expect.stringContaining('accept the confirmation') },
         },
       },
     });
+    expect(exchange.result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('accept the confirmation'),
+        }),
+      ]),
+    );
     expect(await recordStatus(session, draftId)).toBe('draft');
   });
 });
