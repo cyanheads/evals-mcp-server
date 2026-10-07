@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.5](changelog/0.1.x/0.1.5.md) — 2026-10-07 · 🛡️ Security
+
+Submit confirmation is bound to the caller and complete draft, Docker starts with writable default storage, and framework maintenance updates input recovery and error privacy.
+
 ## [0.1.4](changelog/0.1.x/0.1.4.md) — 2026-09-21 · ⚠️ Breaking
 
 HTTP now requires a stateful session — evals_submit_draft's confirmation needs a live session with 2025-era clients, so the Docker image and .env.example default to MCP_SESSION_MODE=stateful, and a stateless HTTP start now fails at boot.

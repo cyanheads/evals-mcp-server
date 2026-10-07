@@ -6,14 +6,14 @@
     "url": "https://github.com/cyanheads/evals-mcp-server",
     "source": "github"
   },
-  "version": "0.1.4",
+  "version": "0.1.5",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/evals-mcp-server",
       "runtimeHint": "npx",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "environmentVariables": [
         {
           "name": "EVALS_DATA_DIR",
@@ -58,7 +58,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/evals-mcp-server",
       "runtimeHint": "npx",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "environmentVariables": [
         {
           "name": "MCP_TRANSPORT_TYPE",
