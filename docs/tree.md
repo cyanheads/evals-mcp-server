@@ -1,6 +1,6 @@
 # evals-mcp-server - Directory Structure
 
-Generated on: 2026-09-22 04:08:01
+Generated on: 2026-10-07 12:34:51
 
 ```text
 evals-mcp-server/
@@ -128,9 +128,11 @@ evals-mcp-server/
 │   ├── clean-mcpb.ts
 │   ├── clean.ts
 │   ├── devcheck.ts
+│   ├── install-otel.ts
 │   ├── lint-mcp.ts
 │   ├── lint-packaging.ts
 │   ├── list-skills.ts
+│   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
 ├── src/
@@ -184,7 +186,8 @@ evals-mcp-server/
 │   │   ├── list-export-resource.tool.test.ts
 │   │   ├── read-tools.tool.test.ts
 │   │   ├── revise-draft.tool.test.ts
-│   │   └── submit-captures.tool.test.ts
+│   │   ├── submit-captures.tool.test.ts
+│   │   └── submit-consent.tool.test.ts
 │   └── authoring-loop.test.ts
 ├── .dockerignore
 ├── .env.example
