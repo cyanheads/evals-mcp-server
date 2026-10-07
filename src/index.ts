@@ -44,7 +44,7 @@ await createApp({
    * 2025-era HTTP client can answer only over a live session — so a stateless
    * HTTP start is refused at boot instead of breaking the gate. Never refuses stdio.
    */
-  sessionMode: { default: 'stateful', require: 'stateful' },
+  sessionMode: { require: 'stateful' },
   async setup() {
     const cfg = getServerConfig();
     const store = initRecordStoreService(cfg.dataDir, cfg.captureDir);

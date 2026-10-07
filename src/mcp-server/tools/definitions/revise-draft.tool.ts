@@ -118,7 +118,7 @@ export const reviseDraftTool = tool('evals_revise_draft', {
       throw ctx.fail(
         'record_frozen',
         `Record "${input.draft_id}" is submitted and frozen; it cannot be revised.`,
-        { ...ctx.recoveryFor('record_frozen'), id: input.draft_id },
+        { id: input.draft_id },
       );
     }
 
