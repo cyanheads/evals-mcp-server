@@ -74,6 +74,13 @@ export const reviseDraftTool = tool('evals_revise_draft', {
   }),
   errors: [
     {
+      reason: 'grader_unexecutable',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The revised grader cannot execute against the gold.',
+      recovery: 'Correct the named expression, pattern, or JSON reference, then retry the patch.',
+      thrownBy: 'service',
+    },
+    {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
       when: 'No record exists with the given draft id.',
@@ -132,8 +139,6 @@ export const reviseDraftTool = tool('evals_revise_draft', {
     const validated = EvalRecordSchema.parse(patched);
     assertTaskTypeConstraints(validated);
 
-    await store.writeDraft(validated, ctx);
-
     const checks = checkSelfConsistency(
       validated.grader,
       validated.gold,
@@ -142,6 +147,7 @@ export const reviseDraftTool = tool('evals_revise_draft', {
       validated.choices,
       hasRecordedVerification(validated),
     );
+    await store.writeDraft(validated, ctx);
 
     ctx.log.info('Revised draft', {
       id: validated.id,

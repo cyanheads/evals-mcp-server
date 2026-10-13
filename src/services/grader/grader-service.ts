@@ -57,6 +57,16 @@ math.import(
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
+/** Convert only finite real math.js scalars; units and collections have no numeric comparison. */
+function realScalar(value: unknown): number | undefined {
+  let number: number;
+  if (typeof value === 'number') number = value;
+  else if (math.isBigNumber(value) || math.isFraction(value)) number = math.number(value);
+  else if (math.isComplex(value) && value.im === 0) number = value.re;
+  else return;
+  return Number.isFinite(number) ? number : undefined;
+}
+
 /**
  * Resolve a numeric target (number or math.js expression string) to a finite number.
  * Throws `grader_unexecutable` when the expression is malformed or non-numeric.
@@ -83,14 +93,10 @@ function resolveNumber(value: number | string, field: string): number {
       },
     );
   }
-  // math.js may return a number, BigNumber, Fraction, or Unit — coerce to a plain number.
-  const n =
-    typeof result === 'number'
-      ? result
-      : Number((result as { toString(): string }).toString().replace(/\s.*$/, ''));
-  if (!Number.isFinite(n)) {
+  const n = realScalar(result);
+  if (n === undefined) {
     throw validationError(
-      `Numeric grader ${field} "${value}" did not resolve to a finite number.`,
+      `Numeric grader ${field} "${value}" did not resolve to a finite real scalar number.`,
       {
         reason: 'grader_unexecutable',
         field,
@@ -107,12 +113,7 @@ function candidateToNumber(candidate: unknown): number | undefined {
     const trimmed = candidate.trim();
     if (trimmed.length === 0) return;
     try {
-      const result = math.evaluate(trimmed);
-      const n =
-        typeof result === 'number'
-          ? result
-          : Number((result as { toString(): string }).toString().replace(/\s.*$/, ''));
-      return Number.isFinite(n) ? n : undefined;
+      return realScalar(math.evaluate(trimmed));
     } catch {
       return;
     }

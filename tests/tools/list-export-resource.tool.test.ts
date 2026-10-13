@@ -24,7 +24,10 @@ import { listRecordsTool } from '@/mcp-server/tools/definitions/list-records.too
 import { submitDraftTool } from '@/mcp-server/tools/definitions/submit-draft.tool.js';
 import type { EvalRecord } from '@/services/eval-record/schema.js';
 import { initExporterService } from '@/services/exporter/exporter-service.js';
-import { initRecordStoreService } from '@/services/record-store/record-store-service.js';
+import {
+  getRecordStoreService,
+  initRecordStoreService,
+} from '@/services/record-store/record-store-service.js';
 
 let dataDir: string;
 const ctx = createMockContext();
@@ -141,9 +144,42 @@ describe('evals_list_records', () => {
     expect(getEnrichment(listCtx).notice).toContain('No records matched');
   });
 
-  it('rejects a non-positive or oversized limit at the Zod boundary', () => {
+  it('rejects a non-positive or non-integer limit at the Zod boundary', () => {
     expect(() => listRecordsTool.input.parse({ limit: 0 })).toThrow();
-    expect(() => listRecordsTool.input.parse({ limit: 501 })).toThrow();
+    expect(() => listRecordsTool.input.parse({ limit: 1.5 })).toThrow();
+  });
+
+  it('returns more than 500 summaries and preserves requested truncation and empty results', async () => {
+    const store = getRecordStoreService();
+    const first = (await store.listSummaries({ status: 'draft', limit: 1 })).summaries[0]!;
+    const base = await store.require(first.id);
+    for (let index = 0; index < 502; index++)
+      await store.writeDraft(
+        { ...base, id: `ev_large_${index}`, metadata: { domain: 'large', tags: [] } },
+        ctx,
+      );
+    const listCtx = createMockContext();
+    const result = await listRecordsTool.handler(
+      listRecordsTool.input.parse({ domain: 'large', limit: 501 }),
+      listCtx,
+    );
+    expect(result.records).toHaveLength(501);
+    expect(getEnrichment(listCtx)).toMatchObject({ totalCount: 502, cap: 501, truncated: true });
+    const all = await listRecordsTool.handler(
+      listRecordsTool.input.parse({ domain: 'large', limit: 502 }),
+      createMockContext(),
+    );
+    expect(all.records).toHaveLength(502);
+    const text = (listRecordsTool.format!(all)[0] as { text: string }).text;
+    for (const record of all.records) expect(text).toContain(record.id);
+    expect(
+      (
+        await listRecordsTool.handler(
+          listRecordsTool.input.parse({ domain: 'absent', limit: 600 }),
+          createMockContext(),
+        )
+      ).records,
+    ).toEqual([]);
   });
 
   it('format() renders a bullet line per record and an empty-state line', () => {

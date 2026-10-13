@@ -22,8 +22,7 @@ export type GateFailureReason =
   | 'verification_incomplete'
   | 'verification_disagrees_with_gold'
   | 'decorrelation_violation'
-  | 'duplicate'
-  | 'capture_unresolved';
+  | 'duplicate';
 
 /** A gate failure with a recovery-oriented message and optional structured data. */
 export interface GateFailure {
@@ -49,13 +48,6 @@ export interface GateSuccess {
 
 /** Discriminated gate result. */
 export type GateResult = { ok: true; value: GateSuccess } | { ok: false; failure: GateFailure };
-
-/** Resolve a captured value to a comparable string for the gold cross-check. */
-function captureValueString(structuredContent: unknown): string | undefined {
-  if (structuredContent === null || structuredContent === undefined) return;
-  if (typeof structuredContent === 'object') return JSON.stringify(structuredContent);
-  return String(structuredContent);
-}
 
 /** Extract the decorrelation source label and verification path from the evidence. */
 function describeVerification(record: EvalRecord): {
@@ -244,5 +236,3 @@ export async function runSubmitGate(
     },
   };
 }
-
-export { captureValueString };

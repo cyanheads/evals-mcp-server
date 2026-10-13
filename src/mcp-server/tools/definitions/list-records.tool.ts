@@ -31,7 +31,6 @@ export const listRecordsTool = tool('evals_list_records', {
       .number()
       .int()
       .positive()
-      .max(500)
       .default(50)
       .describe('Maximum number of summaries to return.'),
   }),
@@ -62,7 +61,7 @@ export const listRecordsTool = tool('evals_list_records', {
       ctx.enrich.truncated({
         shown: summaries.length,
         cap: input.limit,
-        guidance: `Showing the ${input.limit} newest of ${total}; narrow with a status/domain/task_type/tag filter or raise limit (max 500).`,
+        guidance: `Showing the ${input.limit} newest of ${total}; narrow with a status/domain/task_type/tag filter or raise limit.`,
       });
     } else {
       ctx.enrich({ truncated: false, shown: summaries.length, cap: input.limit });

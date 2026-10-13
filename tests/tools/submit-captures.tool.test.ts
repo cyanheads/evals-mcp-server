@@ -11,6 +11,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { validateDefinitions } from '@cyanheads/mcp-ts-core/linter';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
@@ -87,6 +88,39 @@ afterEach(async () => {
 });
 
 describe('evals_submit_draft — capture resolution', () => {
+  it('keeps contract lint active for unreachable non-service reasons', () => {
+    const extra = {
+      reason: 'unreachable_probe',
+      code: -32007,
+      when: 'Never emitted by the real handler.',
+      recovery: 'This diagnostic exists only to test the handler scan.',
+    };
+    const warnings = validateDefinitions({
+      tools: [{ ...submitDraftTool, errors: [...submitDraftTool.errors!, extra] }],
+    }).warnings;
+    expect(
+      warnings.some(
+        (warning) =>
+          warning.rule === 'error-contract-unthrown' &&
+          warning.message.includes('unreachable_probe'),
+      ),
+    ).toBe(true);
+    const serviceWarnings = validateDefinitions({
+      tools: [
+        {
+          ...submitDraftTool,
+          errors: [...submitDraftTool.errors!, { ...extra, thrownBy: 'service' }],
+        },
+      ],
+    }).warnings;
+    expect(
+      serviceWarnings.some(
+        (warning) =>
+          warning.rule === 'error-contract-unthrown' &&
+          warning.message.includes('unreachable_probe'),
+      ),
+    ).toBe(false);
+  });
   it('refuses capture_unresolved when a referenced capture file is missing', async () => {
     const id = await createCapturedDraft({
       prompt: 'Missing capture — AAPL revenue?',

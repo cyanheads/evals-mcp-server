@@ -10,7 +10,11 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMockContext, expectInputRequired } from '@cyanheads/mcp-ts-core/testing';
+import {
+  createMockContext,
+  expectInputRequired,
+  runToolContract,
+} from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
 import { createDraftTool } from '@/mcp-server/tools/definitions/create-draft.tool.js';
@@ -21,8 +25,12 @@ import { listRecordsTool } from '@/mcp-server/tools/definitions/list-records.too
 import { reviseDraftTool } from '@/mcp-server/tools/definitions/revise-draft.tool.js';
 import { runCheckTool } from '@/mcp-server/tools/definitions/run-check.tool.js';
 import { submitDraftTool } from '@/mcp-server/tools/definitions/submit-draft.tool.js';
+import { runSubmitGate } from '@/services/eval-record/submit-gate.js';
 import { initExporterService } from '@/services/exporter/exporter-service.js';
-import { initRecordStoreService } from '@/services/record-store/record-store-service.js';
+import {
+  getRecordStoreService,
+  initRecordStoreService,
+} from '@/services/record-store/record-store-service.js';
 
 let dataDir: string;
 const ctx = createMockContext();
@@ -182,6 +190,87 @@ describe('full authoring loop', () => {
 });
 
 describe('submit gate refusals (the record stays a draft)', () => {
+  it('preserves messages, data, codes, and wire recovery for every gate reason', async () => {
+    const duplicatePrompt = 'Wire gate duplicate seed';
+    const duplicateSeed = await createDraftTool.handler(
+      createDraftTool.input.parse({
+        ...probabilityDraftInput(),
+        prompt: duplicatePrompt,
+        verification: { method: 'independent', evidence: [{ type: 'note', text: 'checked' }] },
+      }),
+      createCtx,
+    );
+    await submitDraftTool.handler({ draft_id: duplicateSeed.draft_id }, submitCtx);
+    const cases = [
+      { reason: 'grader_failed_on_gold', gold: '4' },
+      { reason: 'missing_negative_case', discrimination: { positive: [], negative: [] } },
+      { reason: 'negative_case_passed', discrimination: { positive: [], negative: ['5/14'] } },
+      { reason: 'verification_incomplete', verification: { method: 'unspecified', evidence: [] } },
+      {
+        reason: 'decorrelation_violation',
+        verification: {
+          method: 'same',
+          generation_method: 'same',
+          evidence: [{ type: 'note', text: 'checked' }],
+        },
+      },
+      {
+        reason: 'verification_disagrees_with_gold',
+        verification: {
+          method: 'independent',
+          evidence: [
+            {
+              type: 'deterministic_check',
+              tool: 'check',
+              claim: 'gold',
+              computed: '4',
+              passed: true,
+            },
+          ],
+        },
+      },
+      { reason: 'duplicate', prompt: duplicatePrompt },
+    ];
+    const store = getRecordStoreService();
+    for (const { reason, ...overrides } of cases) {
+      const created = await createDraftTool.handler(
+        createDraftTool.input.parse({
+          ...probabilityDraftInput(),
+          prompt: `Wire gate ${reason}`,
+          verification: { method: 'independent', evidence: [{ type: 'note', text: 'checked' }] },
+          ...overrides,
+        }),
+        createCtx,
+      );
+      const expected = await runSubmitGate(await store.require(created.draft_id), store);
+      expect(expected.ok).toBe(false);
+      if (expected.ok) throw new Error('Expected refusal fixture.');
+      expect(expected.failure.reason).toBe(reason);
+      const result = await runToolContract(submitDraftTool, { draft_id: created.draft_id });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        error: {
+          code: -32007,
+          message: expected.failure.message,
+          data: {
+            ...expected.failure.data,
+            reason,
+            recovery: {
+              hint: submitDraftTool.errors!.find((entry) => entry.reason === reason)!.recovery,
+            },
+          },
+        },
+      });
+      const text = result.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n');
+      expect(text).toContain(expected.failure.message);
+      expect(text).toContain(
+        submitDraftTool.errors!.find((entry) => entry.reason === reason)!.recovery,
+      );
+    }
+  });
   async function draftWithVerification(
     overrides: Partial<ReturnType<typeof probabilityDraftInput>>,
   ): Promise<string> {
@@ -433,6 +522,24 @@ describe('discard + frozen guards', () => {
     );
     const submittedId = submittedList.records[0]?.id;
     expect(submittedId).toBeDefined();
+    if (!submittedId) throw new Error('Expected a submitted record fixture.');
+    const file = join(dataDir, 'submitted', `${submittedId}.json`);
+    const before = await readFile(file, 'utf8');
+    for (const definition of [discardDraftTool, reviseDraftTool, submitDraftTool]) {
+      const result = await runToolContract(definition, { draft_id: submittedId });
+      expect(result.structuredContent).toMatchObject({
+        error: {
+          code: -32007,
+          data: { reason: 'record_frozen', recovery: { hint: expect.any(String) } },
+        },
+      });
+      expect(
+        result.content.some(
+          (block) => block.type === 'text' && block.text.includes('record_frozen'),
+        ),
+      ).toBe(true);
+      expect(await readFile(file, 'utf8')).toBe(before);
+    }
     await expect(
       reviseDraftTool.handler(
         reviseDraftTool.input.parse({ draft_id: submittedId!, set: { prompt: 'x' } }),

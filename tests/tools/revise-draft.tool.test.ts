@@ -6,10 +6,10 @@
  * @module tests/tools/revise-draft.tool.test
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
 import { createDraftTool } from '@/mcp-server/tools/definitions/create-draft.tool.js';
@@ -51,6 +51,33 @@ afterAll(async () => {
 });
 
 describe('evals_revise_draft — mcq_choice_mismatch', () => {
+  it.each([
+    { kind: 'numeric', target: '5/' },
+    { kind: 'regex', pattern: '(' },
+    { kind: 'json_match' },
+    { kind: 'json_match', schema: { type: 'invalid' } },
+  ])('preserves draft bytes when revised grader cannot execute: %j', async (grader) => {
+    const draftId = await createMcqDraft();
+    const file = join(dataDir, 'drafts', `${draftId}.json`);
+    const before = await readFile(file, 'utf8');
+    await expect(
+      reviseDraftTool.handler(
+        reviseDraftTool.input.parse({ draft_id: draftId, set: { grader } }),
+        reviseCtx,
+      ),
+    ).rejects.toMatchObject({ code: -32007, data: { reason: 'grader_unexecutable' } });
+    const result = await runToolContract(reviseDraftTool, { draft_id: draftId, set: { grader } });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: -32007,
+        data: { reason: 'grader_unexecutable', recovery: { hint: expect.any(String) } },
+      },
+    });
+    expect(
+      result.content.some((block) => block.type === 'text' && block.text.includes('Recovery:')),
+    ).toBe(true);
+    expect(await readFile(file, 'utf8')).toBe(before);
+  });
   it('throws mcq_choice_mismatch when grader.correct is patched to a value not in choices', async () => {
     const draftId = await createMcqDraft();
     await expect(
@@ -79,6 +106,34 @@ describe('evals_revise_draft — mcq_choice_mismatch', () => {
 });
 
 describe('evals_revise_draft — happy path (mcq)', () => {
+  it('rejects a mixed unknown-path patch without writing', async () => {
+    const draftId = await createMcqDraft();
+    const file = join(dataDir, 'drafts', `${draftId}.json`);
+    const before = await readFile(file, 'utf8');
+    await expect(
+      reviseDraftTool.handler(
+        reviseDraftTool.input.parse({
+          draft_id: draftId,
+          set: { 'metadata.domain': 'updated', 'not.real': true },
+        }),
+        reviseCtx,
+      ),
+    ).rejects.toMatchObject({ code: -32007, data: { reason: 'invalid_patch_path' } });
+    const result = await runToolContract(reviseDraftTool, {
+      draft_id: draftId,
+      set: { 'metadata.domain': 'updated', 'not.real': true },
+    });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: -32007,
+        data: { reason: 'invalid_patch_path', recovery: { hint: expect.any(String) } },
+      },
+    });
+    expect(
+      result.content.some((block) => block.type === 'text' && block.text.includes('Recovery:')),
+    ).toBe(true);
+    expect(await readFile(file, 'utf8')).toBe(before);
+  });
   it('accepts a valid grader.correct patch and reports the change', async () => {
     const draftId = await createMcqDraft();
     const result = await reviseDraftTool.handler(

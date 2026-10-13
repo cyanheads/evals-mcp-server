@@ -87,7 +87,7 @@ type EvalRecord = {
 
 ## Grader DSL
 
-Each grader is a small typed variant, serialized with the record, executed by the server (deterministic kinds) or an LLM judge (`llm_rubric`).
+Each grader is a small typed variant serialized with the record. The server executes deterministic kinds; `llm_rubric` relies on recorded independent verification and is flagged `server_verified: false`.
 
 ```ts
 type Grader =

@@ -12,6 +12,41 @@ import { checkSelfConsistency, gradeCandidate } from '@/services/grader/grader-s
 describe('gradeCandidate — numeric', () => {
   const grader: Grader = { kind: 'numeric', target: '5/14', rel_tol: 1e-6 };
 
+  it.each([
+    ['5/14', 5 / 14],
+    ['1e3', 1000],
+    ['combinations(5,2)/combinations(8,2)', 5 / 14],
+    ['bignumber("5")', 5],
+    ['fraction(1,2)', 0.5],
+    ['complex(5,0)', 5],
+  ] as const)('preserves finite real scalar %s', (expression, expected) => {
+    expect(gradeCandidate({ kind: 'numeric', target: expected }, expression).pass).toBe(true);
+    expect(gradeCandidate({ kind: 'numeric', target: expression }, expected)).toMatchObject({
+      pass: true,
+      resolved: expected,
+    });
+  });
+
+  it.each(['5 kg', '5 lbs', '5 meters', '2+3i', '[5]', 'true', 'Infinity', 'NaN'])(
+    'rejects nonscalar or non-real candidate %s',
+    (expression) => {
+      expect(
+        gradeCandidate({ kind: 'numeric', target: expression === '2+3i' ? 2 : 5 }, expression).pass,
+      ).toBe(false);
+    },
+  );
+
+  it.each(['5 kg', '2+3i', '[5]', 'true', 'Infinity', 'NaN'])(
+    'fails invalid target %s with the declared reason',
+    (target) => {
+      expect(() => gradeCandidate({ kind: 'numeric', target }, 5)).toThrow(
+        expect.objectContaining({
+          data: expect.objectContaining({ reason: 'grader_unexecutable' }),
+        }),
+      );
+    },
+  );
+
   it('resolves a math.js expression target and passes an equal candidate', () => {
     const r = gradeCandidate(grader, '5/14');
     expect(r.pass).toBe(true);

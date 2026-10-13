@@ -11,7 +11,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
 import { createDraftTool } from '@/mcp-server/tools/definitions/create-draft.tool.js';
@@ -71,6 +71,35 @@ describe('evals_describe_schema', () => {
 });
 
 describe('evals_run_check', () => {
+  it('renders real numeric scalar rejections and target recovery on both contract surfaces', async () => {
+    const result = await runToolContract(runCheckTool, {
+      grader: { kind: 'numeric', target: 5 },
+      candidates: ['5 kg', '5+3i', 'bignumber("5")', 'fraction(5)', 'complex(5,0)'],
+    });
+    expect(result.structuredContent).toMatchObject({
+      pass_count: 3,
+      results: [{ pass: false }, { pass: false }, { pass: true }, { pass: true }, { pass: true }],
+    });
+    const text = result.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n');
+    expect(text).toContain('3/5 passed');
+    expect(text).toContain('REJECT');
+    const failure = await runToolContract(runCheckTool, {
+      grader: { kind: 'numeric', target: '5 kg' },
+      candidates: [5],
+    });
+    expect(failure.structuredContent).toMatchObject({
+      error: {
+        code: -32007,
+        data: { reason: 'grader_unexecutable', recovery: { hint: expect.any(String) } },
+      },
+    });
+    expect(
+      failure.content.some((block) => block.type === 'text' && block.text.includes('Recovery:')),
+    ).toBe(true);
+  });
   it('grades multiple candidates and reports the pass_count + resolved reference', async () => {
     const result = await runCheckTool.handler(
       runCheckTool.input.parse({

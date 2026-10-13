@@ -54,7 +54,7 @@ export const NumericGraderSchema = z
           ),
       ])
       .describe(
-        'Reference value as a number or a math.js expression string, resolved to a number for comparison.',
+        'Reference value as a number or a math.js expression resolving to a finite real scalar. Units, non-real complex values, and collections are invalid.',
       ),
     rel_tol: z
       .number()

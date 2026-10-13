@@ -8,10 +8,10 @@
  * @module tests/tools/create-draft.tool.test
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
 import { createDraftTool } from '@/mcp-server/tools/definitions/create-draft.tool.js';
@@ -101,22 +101,44 @@ describe('evals_create_draft — happy path and seeding', () => {
 });
 
 describe('evals_create_draft — validation rejections', () => {
-  it('throws grader_unexecutable for a malformed math.js target', async () => {
+  it.each([
+    { kind: 'numeric', target: '5/' },
+    { kind: 'regex', pattern: '(' },
+    { kind: 'json_match' },
+    { kind: 'json_match', schema: { type: 'invalid' } },
+  ])('leaves no orphan for unexecutable grader %j', async (grader) => {
+    const before = await readdir(join(dataDir, 'drafts'));
     await expect(
       createDraftTool.handler(
         createDraftTool.input.parse({
           task_type: 'numeric',
-          prompt: 'bad target',
+          prompt: 'Invalid grader',
           gold: '1',
-          grader: { kind: 'numeric', target: '5/' },
+          grader,
           discrimination: { positive: [], negative: ['0'] },
           metadata: { domain: 'd', tags: [] },
         }),
         createCtx,
       ),
-    ).rejects.toMatchObject({ data: { reason: 'grader_unexecutable' } });
+    ).rejects.toMatchObject({ code: -32007, data: { reason: 'grader_unexecutable' } });
+    expect(await readdir(join(dataDir, 'drafts'))).toEqual(before);
   });
 
+  it('persists an executable grader whose gold fails', async () => {
+    const result = await createDraftTool.handler(
+      createDraftTool.input.parse({
+        task_type: 'numeric',
+        prompt: 'Failing gold',
+        gold: 4,
+        grader: { kind: 'numeric', target: 5 },
+        discrimination: { positive: [], negative: [0] },
+        metadata: { domain: 'd', tags: [] },
+      }),
+      createCtx,
+    );
+    expect(result.server_checks.self_consistency.gold_passes_grader).toBe(false);
+    expect((await getRecordTool.handler({ id: result.draft_id }, getCtx)).record.gold).toBe(4);
+  });
   it('throws task_type_constraint for mcq without choices', async () => {
     await expect(
       createDraftTool.handler(
@@ -212,10 +234,40 @@ describe('evals_create_draft — format()', () => {
       createDraftTool.input.parse({
         task_type: 'numeric',
         prompt: 'Formatted — P(both red)?',
+        context: 'Grounding with a newline\nand "quotes".',
         gold: '5/14',
         grader: { kind: 'numeric', target: '5/14', rel_tol: 1e-3 },
         discrimination: { positive: ['10/28'], negative: ['25/64'] },
-        metadata: { domain: 'math.probability', tags: ['fmt'] },
+        choices: ['5/14', '25/64'],
+        metadata: {
+          domain: 'math.probability',
+          tags: ['fmt'],
+          contamination_notes: 'Novel question',
+          source_provenance: [
+            {
+              server: 'source',
+              query: 'query',
+              value: '5/14',
+              uri: 'https://example.test/reference',
+              retrieved_at: '2026-10-13T00:00:00Z',
+            },
+          ],
+        },
+        verification: {
+          method: 'independent',
+          generation_method: 'algebra',
+          evidence: [
+            {
+              type: 'deterministic_check',
+              tool: 'check',
+              claim: 'gold',
+              computed: '5/14',
+              passed: true,
+            },
+          ],
+        },
+        captures: ['source_123'],
+        author_model: 'author-test',
       }),
       createCtx,
     );
@@ -227,5 +279,34 @@ describe('evals_create_draft — format()', () => {
     expect(text).toContain('numeric, target=');
     // The ready-to-paste subagent prompt is embedded.
     expect(text).toContain('evals_get_record');
+    const json = text.match(/```json\n([\s\S]*?)\n```/);
+    expect(json).not.toBeNull();
+    expect(JSON.parse(json![1]!)).toEqual(result.normalized_record);
+    expect(text).toContain(result.review_protocol);
+    for (const line of result.suggested_subagent_prompt.split('\n')) expect(text).toContain(line);
+    for (const required of result.required_before_submit) expect(text).toContain(required);
+  });
+
+  it('carries the full generated record on both contract surfaces', async () => {
+    const result = await runToolContract(createDraftTool, {
+      task_type: 'mcq',
+      prompt: 'Choice parity',
+      context: 'Context',
+      gold: 'B',
+      choices: ['A', 'B'],
+      grader: { kind: 'mcq', correct: 'B' },
+      discrimination: { positive: [], negative: ['A'] },
+      metadata: { domain: 'd', tags: ['parity'] },
+      author_model: 'author-test',
+    });
+    expect(result.isError).not.toBe(true);
+    const text = result.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n');
+    const json = text.match(/```json\n([\s\S]*?)\n```/);
+    expect(JSON.parse(json![1]!)).toEqual(
+      createDraftTool.output!.parse(result.structuredContent).normalized_record,
+    );
   });
 });

@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.5-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.5-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/evals-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/evals-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/evals-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -59,7 +59,7 @@ All record data is also reachable through the tool surface — `evals_get_record
 ### `evals_create_draft` <sub>tool</sub>
 
 - Accepts a record with its grader and discrimination cases, plus optional `verification` and `captures` (EvalsIDs); `mcq` requires `choices`, and `free_response` requires `llm_rubric`.
-- Persists as `draft` and returns the normalized record, review protocol, verification-subagent prompt, and remaining submit requirements. Self-consistency checks `gold` and positives for PASS and negatives for REJECT; independent verification is still required before submit.
+- Checks grader executability before persisting as `draft`, then returns the full normalized record in JSON and text, review protocol, verification-subagent prompt, and remaining submit requirements. Executable graders with failing gold remain valid drafts; independent verification is still required before submit.
 - Typed errors: `grader_unexecutable`, `task_type_constraint`, `mcq_choice_mismatch`.
 
 ---
@@ -74,8 +74,9 @@ All record data is also reachable through the tool surface — `evals_get_record
 ### `evals_revise_draft` <sub>tool</sub>
 
 - Applies `set`, `append`, and `unset` by dotted path to a draft; `task_type` and server-owned fields cannot be changed.
-- Re-validates the record and task-type constraints, re-runs self-consistency, and returns the record plus `changed` entries (`op`, `path`, `before`, `after`).
-- Typed errors: `not_found`, `record_frozen` for a submitted id, `invalid_patch_path`, `task_type_constraint`, `mcq_choice_mismatch`.
+- Rejects unknown typed paths atomically; absent declared optional fields and object paths inside arbitrary JSON values remain supported. Arrays are replaced whole or appended, without indexed editing.
+- Re-validates the record, task-type constraints, and executable grader before writing, then returns the record plus `changed` entries (`op`, `path`, `before`, `after`).
+- Typed errors: `not_found`, `record_frozen` for a submitted id, `invalid_patch_path`, `grader_unexecutable`, `task_type_constraint`, `mcq_choice_mismatch`.
 
 ---
 
@@ -90,6 +91,7 @@ All record data is also reachable through the tool surface — `evals_get_record
 
 - Runs a grader against one or more `candidates` without a saved record; supply `gold` for `exact_match`, while target-embedding kinds such as `numeric` and `mcq` ignore it.
 - Returns PASS/REJECT, `detail`, and the `resolved` reference per candidate. `llm_rubric` is unexecutable here; submit relies on recorded independent verification.
+- Numeric grading accepts finite real Number, BigNumber, Fraction, and zero-imaginary Complex results; unit-bearing, non-real, nonfinite, and nonscalar candidates are rejected, and those targets are unexecutable. `units` is documentation only.
 - Typed errors: `grader_unexecutable`, `mcq_choice_mismatch`.
 
 ---
@@ -104,7 +106,7 @@ All record data is also reachable through the tool surface — `evals_get_record
 
 ### `evals_list_records` <sub>tool</sub>
 
-- Filters by `status` (draft/submitted), `domain`, `task_type`, or `tag`; `limit` defaults to 50 and allows up to 500.
+- Filters by `status` (draft/submitted), `domain`, `task_type`, or `tag`; `limit` is a positive integer and defaults to 50.
 - Returns summaries (id, status, task_type, domain, tags, timestamps), newest-first, with `shown`, `cap`, `totalCount`, and `truncated`.
 
 ---

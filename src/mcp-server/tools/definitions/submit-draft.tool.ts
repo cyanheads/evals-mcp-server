@@ -299,9 +299,27 @@ export const submitDraftTool = tool('evals_submit_draft', {
     // Run the committability gate.
     const gate = await runSubmitGate(withCaptures, store);
     if (!gate.ok) {
-      throw ctx.fail(gate.failure.reason, gate.failure.message, {
-        ...gate.failure.data,
-      });
+      const { reason, message, data } = gate.failure;
+      switch (reason) {
+        case 'grader_failed_on_gold':
+          throw ctx.fail('grader_failed_on_gold', message, data);
+        case 'missing_negative_case':
+          throw ctx.fail('missing_negative_case', message, data);
+        case 'negative_case_passed':
+          throw ctx.fail('negative_case_passed', message, data);
+        case 'verification_incomplete':
+          throw ctx.fail('verification_incomplete', message, data);
+        case 'decorrelation_violation':
+          throw ctx.fail('decorrelation_violation', message, data);
+        case 'verification_disagrees_with_gold':
+          throw ctx.fail('verification_disagrees_with_gold', message, data);
+        case 'duplicate':
+          throw ctx.fail('duplicate', message, data);
+        default: {
+          const exhaustive: never = reason;
+          return exhaustive;
+        }
+      }
     }
 
     // Freeze (promoteToSubmitted always stamps checksum + submitted_at).

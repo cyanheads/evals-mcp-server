@@ -92,6 +92,7 @@ describe('RecordStoreService — CRUD and require()', () => {
     await store.writeDraft(rec, ctx);
     await store.promoteToSubmitted(rec, ctx);
     await expect(store.deleteDraft(rec.id, ctx)).rejects.toMatchObject({
+      code: -32007,
       data: { reason: 'record_frozen' },
     });
   });
@@ -128,6 +129,75 @@ describe('RecordStoreService — computeContentHash', () => {
 
 describe('RecordStoreService — applyPatch', () => {
   const store = new RecordStoreService('/tmp/unused-patch', undefined);
+
+  it('rejects an unknown grader path when another operation removes the grader', () => {
+    expect(() =>
+      store.applyPatch(draftRecord(), { set: { 'grader.typo': 1 }, unset: ['grader'] }),
+    ).toThrow(
+      expect.objectContaining({ data: expect.objectContaining({ reason: 'invalid_patch_path' }) }),
+    );
+  });
+
+  it('preserves optional fields, array replacement, and arbitrary JSON object subtrees', () => {
+    const base = draftRecord({
+      gold: { nested: { value: 1 } },
+      grader: { kind: 'json_match', expected: { nested: { value: 1 } } },
+    });
+    const { record } = store.applyPatch(base, {
+      set: {
+        'metadata.license': 'MIT',
+        'metadata.tags': ['updated'],
+        'gold.nested.value': 2,
+        'grader.expected.nested.value': 2,
+        'grader.schema.properties.nested.type': 'object',
+      },
+    });
+    expect(record.gold).toEqual({ nested: { value: 2 } });
+    expect(record.grader).toMatchObject({
+      expected: { nested: { value: 2 } },
+      schema: { properties: { nested: { type: 'object' } } },
+    });
+    expect(record.metadata).toMatchObject({ license: 'MIT', tags: ['updated'] });
+  });
+
+  it('supports switching grader kind within one patch', () => {
+    const { record } = store.applyPatch(draftRecord(), {
+      set: { grader: { kind: 'regex', pattern: '^5$' }, 'grader.flags': 'i' },
+    });
+    expect(record.grader).toEqual({ kind: 'regex', pattern: '^5$', flags: 'i' });
+    const switched = store.applyPatch(draftRecord(), {
+      set: { 'grader.kind': 'regex', 'grader.pattern': '^5$', 'grader.flags': 'i' },
+      unset: ['grader.target', 'grader.rel_tol'],
+    });
+    expect(switched.record.grader).toEqual({ kind: 'regex', pattern: '^5$', flags: 'i' });
+  });
+
+  it('sets an absent optional numeric field and appends inside arbitrary JSON objects', () => {
+    const result = store.applyPatch(draftRecord({ gold: { nested: { list: [1] } } }), {
+      set: { 'grader.abs_tol': 0.01 },
+      append: { 'gold.nested.list': [2] },
+    });
+    expect(result.record.grader).toMatchObject({ abs_tol: 0.01 });
+    expect(result.record.gold).toEqual({ nested: { list: [1, 2] } });
+  });
+
+  it.each([
+    'not.real',
+    'metadata.typo',
+    'grader.typo',
+    'grader.target.typo',
+    'metadata.tags.0',
+    'gold.__proto__.polluted',
+  ])('rejects unknown or unsupported path %s atomically', (path) => {
+    const base = draftRecord();
+    const before = structuredClone(base);
+    expect(() =>
+      store.applyPatch(base, { set: { 'metadata.domain': 'updated', [path]: true } }),
+    ).toThrow(
+      expect.objectContaining({ data: expect.objectContaining({ reason: 'invalid_patch_path' }) }),
+    );
+    expect(base).toEqual(before);
+  });
 
   it('set replaces a leaf and reports before/after', () => {
     const { record, changed } = store.applyPatch(draftRecord(), {

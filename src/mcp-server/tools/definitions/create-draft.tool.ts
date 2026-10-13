@@ -133,9 +133,8 @@ export const createDraftTool = tool('evals_create_draft', {
     const store = getRecordStoreService();
     const cfg = getServerConfig();
 
-    // Step 1+2: build (validates task-type constraints), then persist.
+    // Validate the task shape and executable grader before persisting.
     const record = buildDraft(input, cfg.defaultLicense);
-    await store.writeDraft(record, ctx);
 
     // Step 3: cheap self-consistency.
     const verificationPresent = hasRecordedVerification(record);
@@ -147,6 +146,7 @@ export const createDraftTool = tool('evals_create_draft', {
       record.choices,
       verificationPresent,
     );
+    await store.writeDraft(record, ctx);
 
     // Step 4: the reflection forcing function.
     const subagentPrompt = buildSubagentPrompt(record.id);
@@ -184,6 +184,13 @@ export const createDraftTool = tool('evals_create_draft', {
       result.suggested_subagent_prompt,
       result.required_before_submit,
     );
-    return [{ type: 'text', text: head + review }];
+    const recordJson = [
+      '**normalized record:**',
+      '```json',
+      JSON.stringify(result.normalized_record, null, 2),
+      '```',
+      '',
+    ].join('\n');
+    return [{ type: 'text', text: head + recordJson + review }];
   },
 });

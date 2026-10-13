@@ -12,9 +12,8 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { Context } from '@cyanheads/mcp-ts-core';
+import { type Context, z } from '@cyanheads/mcp-ts-core';
 import {
-  conflict,
   notFound,
   serializationError,
   serviceUnavailable,
@@ -25,6 +24,7 @@ import {
   type Capture,
   CaptureSchema,
   type EvalRecord,
+  RecordObjectSchema,
   type RecordStatus,
   type RecordSummary,
 } from '@/services/eval-record/schema.js';
@@ -232,7 +232,7 @@ export class RecordStoreService {
   async deleteDraft(id: string, ctx: Context): Promise<void> {
     const submitted = await this.readFileOrNull(this.pathFor('submitted', id));
     if (submitted !== null) {
-      throw conflict(
+      throw validationError(
         `Record "${id}" is submitted and frozen; submitted records cannot be discarded.`,
         { reason: 'record_frozen', id },
       );
@@ -298,6 +298,22 @@ export class RecordStoreService {
       changed.push({ op: 'unset', path, before, after: undefined });
     }
 
+    /**
+     * Resolve paths against the final grader variant, so a patch may change kind.
+     * Removed fields may belong to the previous variant during that transition.
+     */
+    for (const change of changed) {
+      if (
+        !this.isDeclaredPath(next, change.path) &&
+        !(change.op === 'unset' && this.isDeclaredPath(record, change.path))
+      ) {
+        throw validationError(
+          `Cannot ${change.op} "${change.path}" — it does not resolve against the record schema.`,
+          { reason: 'invalid_patch_path', path: change.path },
+        );
+      }
+    }
+
     const result = next as unknown as EvalRecord;
     result.content_hash = this.computeContentHash(result);
     return { record: result, changed };
@@ -314,12 +330,43 @@ export class RecordStoreService {
         path,
       });
     }
-    if (path.length === 0 || path.startsWith('.') || path.endsWith('.')) {
+    if (path.split('.').some((part) => part === '' || part === '__proto__')) {
       throw validationError(`Invalid patch path "${path}".`, {
         reason: 'invalid_patch_path',
         path,
       });
     }
+  }
+
+  /** Walk declared objects; arbitrary JSON subtrees remain open, arrays are replaced whole. */
+  private isDeclaredPath(record: unknown, path: string): boolean {
+    let schema: z.core.$ZodType = RecordObjectSchema;
+    let value = record;
+    for (const part of path.split('.')) {
+      while (schema instanceof z.ZodOptional) schema = schema.unwrap();
+      if (schema instanceof z.ZodDiscriminatedUnion) {
+        if (value === null || typeof value !== 'object') return false;
+        const discriminator = schema.def.discriminator;
+        const selected = schema.options.find(
+          (option) =>
+            option instanceof z.ZodObject &&
+            option.shape[discriminator].safeParse((value as Record<string, unknown>)[discriminator])
+              .success,
+        );
+        if (!selected) return false;
+        schema = selected;
+      }
+      if (schema instanceof z.ZodUnknown) return true;
+      if (schema instanceof z.ZodRecord) schema = schema.valueType;
+      else if (schema instanceof z.ZodObject && Object.hasOwn(schema.shape, part))
+        schema = schema.shape[part];
+      else return false;
+      value =
+        value !== null && typeof value === 'object'
+          ? (value as Record<string, unknown>)[part]
+          : undefined;
+    }
+    return true;
   }
 
   private getPath(obj: unknown, path: string): unknown {
@@ -452,7 +499,7 @@ export class RecordStoreService {
 
   /**
    * Browse and filter records into summary projections. Reads both trees unless
-   * a status filter narrows it. Applies a hard cap and reports whether it was hit.
+   * a status filter narrows it. Applies the requested limit and reports truncation.
    */
   async listSummaries(filter: {
     status?: RecordStatus;
