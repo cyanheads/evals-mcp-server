@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.6](changelog/0.1.x/0.1.6.md) — 2026-10-13
+
+Validate drafts before persistence and grade only finite real scalars.
+
 ## [0.1.5](changelog/0.1.x/0.1.5.md) — 2026-10-07 · 🛡️ Security
 
 Submit confirmation is bound to the caller and complete draft, Docker starts with writable default storage, and framework maintenance updates input recovery and error privacy.
