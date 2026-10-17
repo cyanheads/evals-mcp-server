@@ -23,7 +23,7 @@
 
 ## Overview
 
-Verifiable eval records, authored through a draft → review → surgical-revise → submit loop with server-enforced graders. Create a draft carrying its own executable grader, patch it surgically field by field, and submit through a committability gate that requires the gold to pass, a declared negative case to fail, and an independent verification to agree — then compile submitted records to JSONL, CSV, Inspect AI, or lm-evaluation-harness. Runs as a stdio process or a local Streamable HTTP server.
+Build verifiable eval records with server-enforced graders. Draft a record with its own executable grader, revise it field by field, and submit through a gate that requires the gold answer to pass, a negative case to fail, and an independent check to agree. Export to JSONL, CSV, Inspect AI, or lm-evaluation-harness.
 
 ### Tools
 
@@ -59,7 +59,7 @@ All record data is also reachable through the tool surface — `evals_get_record
 ### `evals_create_draft` <sub>tool</sub>
 
 - Accepts a record with its grader and discrimination cases, plus optional `verification` and `captures` (EvalsIDs); `mcq` requires `choices`, and `free_response` requires `llm_rubric`.
-- Checks grader executability before persisting as `draft`, then returns the full normalized record in JSON and text, review protocol, verification-subagent prompt, and remaining submit requirements. Executable graders with failing gold remain valid drafts; independent verification is still required before submit.
+- Saves the record as a `draft` once its grader runs, and returns the normalized record, a review protocol, a verification-subagent prompt, and what submit still needs. A draft whose gold fails its grader is still saved.
 - Typed errors: `grader_unexecutable`, `task_type_constraint`, `mcq_choice_mismatch`.
 
 ---
@@ -73,9 +73,8 @@ All record data is also reachable through the tool surface — `evals_get_record
 
 ### `evals_revise_draft` <sub>tool</sub>
 
-- Applies `set`, `append`, and `unset` by dotted path to a draft; `task_type` and server-owned fields cannot be changed.
-- Rejects unknown typed paths atomically; absent declared optional fields and object paths inside arbitrary JSON values remain supported. Arrays are replaced whole or appended, without indexed editing.
-- Re-validates the record, task-type constraints, and executable grader before writing, then returns the record plus `changed` entries (`op`, `path`, `before`, `after`).
+- Applies `set`, `append`, and `unset` by dotted path to a draft; `task_type` and server-owned fields cannot be changed, and arrays are replaced whole or appended, not edited by index.
+- Re-validates the record and grader before writing, then returns the record plus `changed` entries (`op`, `path`, `before`, `after`). An unknown path rejects the whole patch.
 - Typed errors: `not_found`, `record_frozen` for a submitted id, `invalid_patch_path`, `grader_unexecutable`, `task_type_constraint`, `mcq_choice_mismatch`.
 
 ---
@@ -90,16 +89,16 @@ All record data is also reachable through the tool surface — `evals_get_record
 ### `evals_run_check` <sub>tool</sub>
 
 - Runs a grader against one or more `candidates` without a saved record; supply `gold` for `exact_match`, while target-embedding kinds such as `numeric` and `mcq` ignore it.
-- Returns PASS/REJECT, `detail`, and the `resolved` reference per candidate. `llm_rubric` is unexecutable here; submit relies on recorded independent verification.
-- Numeric grading accepts finite real Number, BigNumber, Fraction, and zero-imaginary Complex results; unit-bearing, non-real, nonfinite, and nonscalar candidates are rejected, and those targets are unexecutable. `units` is documentation only.
+- Returns PASS/REJECT, `detail`, and the `resolved` reference per candidate. `llm_rubric` can't be run here.
+- Numeric grading accepts only finite real values; unit-bearing, complex, nonfinite, and non-scalar candidates are rejected. `units` is documentation only.
 - Typed errors: `grader_unexecutable`, `mcq_choice_mismatch`.
 
 ---
 
 ### `evals_submit_draft` <sub>tool</sub>
 
-- Finalizes by `draft_id`: gold must PASS, ≥1 negative must be REJECTED, and decorrelated verification must agree. Embeds and cross-checks `captures` from `EVALS_CAPTURE_DIR`, rejects duplicate `content_hash`, and optionally asks for confirmation via `confirm` or `EVALS_REQUIRE_CONFIRMATION`.
-- On success, freezes the record with `submitted_at` and `checksum` and returns `status: submitted`; a refusal leaves the draft intact. `free_response` relies on recorded verification alone with `server_verified: false`.
+- Finalizes by `draft_id`: gold must PASS, ≥1 negative must be REJECTED, and decorrelated verification must agree. Also checks `captures` against `EVALS_CAPTURE_DIR`, rejects duplicate `content_hash`, and can ask for confirmation via `confirm` or `EVALS_REQUIRE_CONFIRMATION`.
+- On success, freezes the record with `submitted_at` and `checksum` and returns `status: submitted`; a refusal leaves the draft intact. `free_response` records rely on verification alone and carry `server_verified: false`.
 - Typed errors: `not_found`, `record_frozen`, `verification_incomplete`, `grader_failed_on_gold`, `verification_disagrees_with_gold`, `missing_negative_case`, `negative_case_passed`, `duplicate`, `decorrelation_violation`, `capture_unresolved`, `submit_declined`.
 
 ---
@@ -129,19 +128,18 @@ Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): s
 
 Eval authoring:
 
-- A `draft → review → surgical-revise → submit` loop, with the server acting as both scribe (normalize, persist, compile) and adversarial checker (runs the record's own grader, rejects what doesn't hold up)
-- Records are a Zod `discriminatedUnion` on `task_type` — `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
-- A typed grader DSL serialized with each record — deterministic kinds (`numeric` via math.js, `exact_match`, `set_match`, `regex`, `mcq`, `json_match`) run server-side; `llm_rubric` relies on recorded independent verification
-- An enforced committability gate at submit: the gold must pass its own grader, ≥1 negative must be rejected, and a recorded decorrelated verification must agree with the gold
-- Optional confirmation expires after 10 minutes, binds the caller and complete draft, and must be repeated if the draft changes
-- Plain JSON files under `EVALS_DATA_DIR` — inspectable, diffable, version-controllable records, with drafts, submitted records, and exports kept separate
+- A `draft → review → surgical-revise → submit` loop, with the server both storing records and running each record's own grader to reject what doesn't hold up
+- Seven task types: `numeric`, `exact_answer`, `set_answer`, `mcq`, `regex_answer`, `json_answer`, `free_response`
+- A grader serialized with each record; deterministic kinds (`numeric` via math.js, `exact_match`, `set_match`, `regex`, `mcq`, `json_match`) run server-side, while `llm_rubric` relies on recorded independent verification
+- A submit gate: the gold must pass its own grader, ≥1 negative must be rejected, and a recorded decorrelated verification must agree with the gold
+- Plain JSON files under `EVALS_DATA_DIR`, with drafts, submitted records, and exports kept separate
 
 Agent-friendly output:
 
-- Instructional responses — `evals_create_draft` and `evals_revise_draft` return the parsed record parroted back, a per-field review protocol, and a ready-to-paste verification-subagent prompt
-- Self-consistency verdicts — every draft/revise response reports per-positive and per-negative pass/reject results, not just a boolean
-- Truncation disclosure — `evals_list_records` reports `shown` / `cap` / total count when the limit is hit, so a partial set is never mistaken for the whole corpus
-- Typed refusal — the submit gate fails with a typed `reason` plus a recovery hint, so a rejected record tells the agent exactly what to fix
+- `evals_create_draft` and `evals_revise_draft` return the parsed record, a per-field review protocol, and a ready-to-paste verification-subagent prompt
+- Draft and revise responses report pass/reject results for each positive and negative case
+- `evals_list_records` reports `shown` / `cap` / total count when the limit is hit
+- The submit gate fails with a typed `reason` plus a recovery hint
 
 ## Getting started
 
@@ -253,14 +251,14 @@ All server configuration is validated at startup via Zod schemas in `src/config/
 | `EVALS_CAPTURE_DIR` | Directory of framework-written tool-call captures; when set, `captures` EvalsIDs resolve to full dumps. | — |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for the HTTP server. | `3010` |
-| `MCP_SESSION_MODE` | HTTP session mode: `auto`, `stateful`, or `stateless` (`auto` resolves to `stateful`). A `stateless` HTTP start is refused, since a 2025-era client can answer the `evals_submit_draft` confirmation only over a live session. No effect on stdio. | `stateful` |
+| `MCP_SESSION_MODE` | HTTP session mode: `auto`, `stateful`, or `stateless`; `stateless` is refused because submit confirmation needs a live session. | `stateful` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
 | `OTEL_ENABLED` | Enable [OpenTelemetry instrumentation](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry). | `false` |
 
 See [`.env.example`](./.env.example) for the full list of optional overrides.
 
-Confirmation records use framework storage separately from the eval JSON store. For deployments where a retry can reach another instance, configure `STORAGE_PROVIDER_TYPE=filesystem` with a shared `STORAGE_FILESYSTEM_PATH`, or use `supabase` or `cloudflare-d1`; `cloudflare-kv` is unsuitable for consent because reads and deletes are eventually consistent. Set the same `MCP_REQUEST_STATE_KEY` (at least 32 bytes) on each instance to seal round-trip state. Consent redemption blocks sequential replay; concurrent retries still require serialization because framework storage has no atomic read-and-delete.
+Submit confirmation expires after 10 minutes and must be repeated if the draft changes. When running more than one instance, use shared storage (`STORAGE_PROVIDER_TYPE=filesystem` with a shared `STORAGE_FILESYSTEM_PATH`, `supabase`, or `cloudflare-d1`; not `cloudflare-kv`) and set the same `MCP_REQUEST_STATE_KEY` (at least 32 bytes) on each.
 
 ## Running the server
 
