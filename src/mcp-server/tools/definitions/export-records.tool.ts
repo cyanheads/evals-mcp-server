@@ -46,12 +46,12 @@ export const exportRecordsTool = tool('evals_export_records', {
     notice: z
       .string()
       .optional()
-      .describe('Guidance when no submitted records matched the filter.'),
+      .describe('Guidance when no submitted records matched or invalid files were skipped.'),
   },
 
   async handler(input, ctx) {
     const store = getRecordStoreService();
-    const all = await store.listSubmittedRecords();
+    const { records: all, skipped } = await store.listSubmittedRecords();
     const filtered: EvalRecord[] = all.filter(
       (r) =>
         (!input.domain || r.metadata.domain === input.domain) &&
@@ -67,6 +67,7 @@ export const exportRecordsTool = tool('evals_export_records', {
     const stem = `${format}-${filterStem}`.replace(/[^a-zA-Z0-9._-]/g, '_');
     const { path, bytes } = await store.writeExport(stem, EXPORT_EXTENSION[format], content, ctx);
 
+    const notices: string[] = [];
     if (filtered.length === 0) {
       const applied = [
         input.domain && `domain=${input.domain}`,
@@ -75,10 +76,12 @@ export const exportRecordsTool = tool('evals_export_records', {
       ]
         .filter(Boolean)
         .join(', ');
-      ctx.enrich.notice(
+      notices.push(
         `No submitted records matched${applied ? ` (${applied})` : ''}; wrote an empty ${format} artifact. Submit records with evals_submit_draft first.`,
       );
     }
+    if (skipped.length) notices.push(`Skipped invalid record files: ${skipped.join(', ')}.`);
+    if (notices.length) ctx.enrich.notice(notices.join(' '));
 
     ctx.log.info('Exported records', { format, count: filtered.length, path });
     return { path, format: input.format, record_count: filtered.length, bytes, preview };

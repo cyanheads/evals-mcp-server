@@ -15,6 +15,7 @@ import {
   expectInputRequired,
   runToolContract,
 } from '@cyanheads/mcp-ts-core/testing';
+import { escapeMarkdownInline } from '@cyanheads/mcp-ts-core/utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
 import { createDraftTool } from '@/mcp-server/tools/definitions/create-draft.tool.js';
@@ -184,8 +185,8 @@ describe('full authoring loop', () => {
       ctx,
     );
     const artifact = JSON.parse(await readFile(exported.path, 'utf8'));
-    expect(artifact.format).toBe('inspect');
-    expect(artifact.samples[0].grader_spec.kind).toBe('numeric');
+    expect(artifact).toHaveLength(1);
+    expect(artifact[0].grader_spec.kind).toBe('numeric');
   });
 });
 
@@ -203,6 +204,7 @@ describe('submit gate refusals (the record stays a draft)', () => {
     await submitDraftTool.handler({ draft_id: duplicateSeed.draft_id }, submitCtx);
     const cases = [
       { reason: 'grader_failed_on_gold', gold: '4' },
+      { reason: 'positive_case_failed', discrimination: { positive: ['4'], negative: ['25/64'] } },
       { reason: 'missing_negative_case', discrimination: { positive: [], negative: [] } },
       { reason: 'negative_case_passed', discrimination: { positive: [], negative: ['5/14'] } },
       { reason: 'verification_incomplete', verification: { method: 'unspecified', evidence: [] } },
@@ -227,6 +229,13 @@ describe('submit gate refusals (the record stays a draft)', () => {
               passed: true,
             },
           ],
+        },
+      },
+      {
+        reason: 'verification_disagrees_with_gold',
+        verification: {
+          method: 'independent',
+          evidence: [{ type: 'deterministic_check', tool: 'check', claim: 'gold', passed: false }],
         },
       },
       { reason: 'duplicate', prompt: duplicatePrompt },
@@ -265,9 +274,11 @@ describe('submit gate refusals (the record stays a draft)', () => {
         .filter((block) => block.type === 'text')
         .map((block) => block.text)
         .join('\n');
-      expect(text).toContain(expected.failure.message);
+      expect(text).toContain(escapeMarkdownInline(expected.failure.message));
       expect(text).toContain(
-        submitDraftTool.errors!.find((entry) => entry.reason === reason)!.recovery,
+        escapeMarkdownInline(
+          submitDraftTool.errors!.find((entry) => entry.reason === reason)!.recovery,
+        ),
       );
     }
   });

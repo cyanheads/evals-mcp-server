@@ -26,6 +26,13 @@ export const getRecordTool = tool('evals_get_record', {
   }),
   errors: [
     {
+      reason: 'record_invalid',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The stored file could not be decoded as a valid record.',
+      recovery: 'Repair the named record file, then retry.',
+      thrownBy: 'service',
+    },
+    {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
       when: 'No record exists with the given id.',

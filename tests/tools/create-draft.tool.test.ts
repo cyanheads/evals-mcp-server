@@ -37,6 +37,57 @@ afterAll(async () => {
 });
 
 describe('evals_create_draft — happy path and seeding', () => {
+  it('lists accepted negatives without claiming readiness', async () => {
+    const result = await createDraftTool.handler(
+      createDraftTool.input.parse({
+        task_type: 'regex_answer',
+        prompt: 'Year?',
+        gold: '1989',
+        grader: { kind: 'regex', pattern: '19\\d\\d' },
+        discrimination: { positive: [], negative: ['1961'] },
+        metadata: { domain: 'history', tags: [] },
+        verification: { method: 'note', evidence: [{ type: 'note', text: 'Confirmed.' }] },
+      }),
+      createCtx,
+    );
+    expect(result.server_checks.self_consistency.ready_to_submit).toBe(false);
+    expect(result.required_before_submit.join('\n')).toMatch(/negative.*0.*1961/i);
+    expect(result.required_before_submit.join('\n')).not.toContain('Ready:');
+    expect(createDraftTool.format!(result)).toEqual([
+      expect.objectContaining({ text: expect.stringMatching(/negative.*0.*1961/i) }),
+    ]);
+  });
+
+  it('requires a rubric negative and labels skipped results without losing check data', async () => {
+    const result = await createDraftTool.handler(
+      createDraftTool.input.parse({
+        task_type: 'free_response',
+        prompt: 'Explain the sky.',
+        gold: 'Scattering.',
+        grader: {
+          kind: 'llm_rubric',
+          criteria: [{ description: 'Names scattering' }],
+          judge_prompt: 'Grade the explanation.',
+          pass_threshold: 0.5,
+        },
+        discrimination: { positive: ['Light scatters.'], negative: [] },
+        metadata: { domain: 'physics', tags: [] },
+        verification: { method: 'note', evidence: [{ type: 'note', text: 'Confirmed.' }] },
+      }),
+      createCtx,
+    );
+    expect(result.server_checks.self_consistency).toEqual({
+      gold_passes_grader: false,
+      positives_pass: [false],
+      negatives_rejected: [],
+      grader_ok: false,
+      verification_present: true,
+      ready_to_submit: false,
+    });
+    expect(createDraftTool.format!(result)).toEqual([
+      expect.objectContaining({ text: expect.stringContaining('not graded (llm_rubric)') }),
+    ]);
+  });
   it('persists a draft, applies the default license, and reports self-consistency', async () => {
     const result = await createDraftTool.handler(
       createDraftTool.input.parse({

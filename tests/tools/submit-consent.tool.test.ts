@@ -2,7 +2,7 @@
  * @fileoverview Caller-bound, single-use submit consent using real draft storage.
  * @module tests/tools/submit-consent.tool.test
  */
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -177,6 +177,15 @@ describe('submit consent', () => {
     await store.writeDraft(record, mock());
     await expectInputRequired(() => submitDraftTool.handler(input(), second));
     expect((await store.require(draftId)).status).toBe('draft');
+  });
+
+  it('invalidates consent when an unmodeled field in the stored draft changes', async () => {
+    const { second } = await round();
+    const file = join(dataDir, 'drafts', `${draftId}.json`);
+    const raw = JSON.parse(await readFile(file, 'utf8'));
+    await writeFile(file, JSON.stringify({ ...raw, local_note: 'new information' }));
+    await expectInputRequired(() => submitDraftTool.handler(input(), second));
+    expect((await getRecordStoreService().require(draftId)).status).toBe('draft');
   });
 
   it('asks again for an unknown consent id', async () => {

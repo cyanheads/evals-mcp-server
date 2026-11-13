@@ -52,6 +52,35 @@ afterAll(async () => {
 
 describe('evals_revise_draft — mcq_choice_mismatch', () => {
   it.each([
+    { set: { captured_outputs: [] } },
+    { append: { captured_outputs: [] } },
+    { set: { 'captured_outputs.0.args': {} } },
+    { append: { 'captured_outputs.0.args.list': [] } },
+    { unset: ['captured_outputs'] },
+    { unset: ['captured_outputs.0.args.list'] },
+  ])('rejects the server-owned capture subtree atomically: %j', async (ops) => {
+    const draftId = await createMcqDraft();
+    const file = join(dataDir, 'drafts', `${draftId}.json`);
+    const before = await readFile(file, 'utf8');
+    const result = await runToolContract(reviseDraftTool, {
+      ...ops,
+      draft_id: draftId,
+      set: { 'metadata.domain': 'changed', ...ops.set },
+    });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        message: expect.stringContaining('server-owned field'),
+        data: { reason: 'invalid_patch_path', recovery: { hint: expect.any(String) } },
+      },
+    });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('invalid_patch_path') }),
+      ]),
+    );
+    expect(await readFile(file, 'utf8')).toBe(before);
+  });
+  it.each([
     { kind: 'numeric', target: '5/' },
     { kind: 'regex', pattern: '(' },
     { kind: 'json_match' },
@@ -106,6 +135,69 @@ describe('evals_revise_draft — mcq_choice_mismatch', () => {
 });
 
 describe('evals_revise_draft — happy path (mcq)', () => {
+  it('reports failed verification in readiness while preserving skipped rubric verdicts', async () => {
+    const draft = await createDraftTool.handler(
+      createDraftTool.input.parse({
+        task_type: 'free_response',
+        prompt: 'Explain the sky.',
+        gold: 'Scattering.',
+        grader: {
+          kind: 'llm_rubric',
+          criteria: [{ description: 'Names scattering' }],
+          judge_prompt: 'Grade the explanation.',
+          pass_threshold: 0.5,
+        },
+        discrimination: { positive: ['Light scatters.'], negative: ['Ocean reflection.'] },
+        metadata: { domain: 'physics', tags: [] },
+        verification: { method: 'note', evidence: [{ type: 'note', text: 'Confirmed.' }] },
+      }),
+      createCtx,
+    );
+    expect(draft.server_checks.self_consistency.ready_to_submit).toBe(true);
+    const revised = await runToolContract(reviseDraftTool, {
+      draft_id: draft.draft_id,
+      append: {
+        'verification.evidence': [
+          { type: 'deterministic_check', tool: 'verifier', claim: 'gold', passed: false },
+        ],
+      },
+    });
+    expect(revised.structuredContent).toMatchObject({
+      server_checks: {
+        self_consistency: {
+          positives_pass: [false],
+          negatives_rejected: [false],
+          verification_present: true,
+          ready_to_submit: false,
+        },
+      },
+    });
+    expect(revised.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining('not graded (llm_rubric)') }),
+    ]);
+  });
+
+  it('rejects an out-of-range rubric revision without changing the draft', async () => {
+    const draftId = await createMcqDraft();
+    const file = join(dataDir, 'drafts', `${draftId}.json`);
+    const before = await readFile(file, 'utf8');
+    const result = await runToolContract(reviseDraftTool, {
+      draft_id: draftId,
+      set: {
+        grader: {
+          kind: 'llm_rubric',
+          criteria: [{ description: 'Names scattering' }],
+          judge_prompt: 'Grade it.',
+          pass_threshold: 7,
+        },
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining('pass_threshold') }),
+    ]);
+    expect(await readFile(file, 'utf8')).toBe(before);
+  });
   it('rejects a mixed unknown-path patch without writing', async () => {
     const draftId = await createMcqDraft();
     const file = join(dataDir, 'drafts', `${draftId}.json`);

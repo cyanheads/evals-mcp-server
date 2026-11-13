@@ -8,7 +8,7 @@
  * @module tests/tools/submit-captures.tool.test
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateDefinitions } from '@cyanheads/mcp-ts-core/linter';
@@ -192,5 +192,36 @@ describe('evals_submit_draft — capture resolution', () => {
     expect(frozen.captured_outputs?.[0]?.evals_id).toBe('secedgar_ok000000');
     const lifted = frozen.metadata.source_provenance ?? [];
     expect(lifted.some((s) => s.server === 'secedgar' && s.uri === 'trace:abc123')).toBe(true);
+  });
+
+  it('removes preexisting dumps when there are no references to resolve', async () => {
+    const id = await createCapturedDraft({
+      prompt: 'No referenced capture',
+      gold: '5',
+      captures: [],
+    });
+    const path = join(dataDir, 'drafts', `${id}.json`);
+    const original = JSON.parse(await readFile(path, 'utf8'));
+    await writeFile(
+      path,
+      JSON.stringify({
+        ...original,
+        captured_outputs: [
+          {
+            evals_id: 'synthetic_fake0000',
+            ts: '2026-01-01T00:00:00Z',
+            server: 'synthetic',
+            serverVersion: '9',
+            tool: 'test',
+            args: {},
+            structuredContent: 5,
+            isError: false,
+          },
+        ],
+      }),
+    );
+    await submitDraftTool.handler(submitDraftTool.input.parse({ draft_id: id }), submitCtx);
+    const frozen = (await getRecordTool.handler(getRecordTool.input.parse({ id }), getCtx)).record;
+    expect(frozen).not.toHaveProperty('captured_outputs');
   });
 });

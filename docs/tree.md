@@ -1,6 +1,6 @@
 # evals-mcp-server - Directory Structure
 
-Generated on: 2026-10-07 12:34:51
+Generated on: 2026-11-13 16:21:54
 
 ```text
 evals-mcp-server/
@@ -38,6 +38,8 @@ evals-mcp-server/
 │   ├── add-resource/
 │   │   └── SKILL.md
 │   ├── add-service/
+│   │   └── SKILL.md
+│   ├── add-skill/
 │   │   └── SKILL.md
 │   ├── add-test/
 │   │   └── SKILL.md
@@ -135,6 +137,9 @@ evals-mcp-server/
 │   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
+├── skills/
+│   └── evals-guide/
+│       └── SKILL.md
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -163,7 +168,9 @@ evals-mcp-server/
 │   │   ├── exporter/
 │   │   │   └── exporter-service.ts
 │   │   ├── grader/
-│   │   │   └── grader-service.ts
+│   │   │   ├── grader-service.ts
+│   │   │   ├── json-schema-validator.ts
+│   │   │   └── strip-latex.ts
 │   │   └── record-store/
 │   │       └── record-store-service.ts
 │   └── index.ts
@@ -180,6 +187,7 @@ evals-mcp-server/
 │   │   ├── exporter.test.ts
 │   │   ├── grader.test.ts
 │   │   ├── record-store.test.ts
+│   │   ├── strip-latex.test.ts
 │   │   └── submit-gate.test.ts
 │   ├── tools/
 │   │   ├── create-draft.tool.test.ts
@@ -204,7 +212,9 @@ evals-mcp-server/
 ├── Dockerfile
 ├── LICENSE
 ├── manifest.json
+├── mcp.json
 ├── package.json
+├── plugin.json
 ├── README.md
 ├── server.json
 ├── tsconfig.build.json

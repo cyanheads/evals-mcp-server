@@ -6,8 +6,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { Grader } from '@/services/eval-record/schema.js';
-import { checkSelfConsistency, gradeCandidate } from '@/services/grader/grader-service.js';
+import { type Grader, GraderSchema } from '@/services/eval-record/schema.js';
+import { gradeCandidate } from '@/services/grader/grader-service.js';
 
 describe('gradeCandidate — numeric', () => {
   const grader: Grader = { kind: 'numeric', target: '5/14', rel_tol: 1e-6 };
@@ -116,6 +116,11 @@ describe('gradeCandidate — numeric', () => {
 });
 
 describe('gradeCandidate — exact_match (gold-relative)', () => {
+  it('preserves token boundaries when stripping punctuation', () => {
+    const grader: Grader = { kind: 'exact_match', normalize: ['strip_punct', 'trim'] };
+    expect(gradeCandidate(grader, 'alpha beta', 'alpha-beta').pass).toBe(true);
+    expect(gradeCandidate(grader, 'alphabeta', 'alpha-beta').pass).toBe(false);
+  });
   it('passes after normalization and rejects a mismatch', () => {
     const grader: Grader = { kind: 'exact_match', normalize: ['trim', 'lowercase', 'strip_punct'] };
     expect(gradeCandidate(grader, '  Paris! ', 'paris').pass).toBe(true);
@@ -127,6 +132,23 @@ describe('gradeCandidate — exact_match (gold-relative)', () => {
     expect(gradeCandidate(grader, '$x^2$', 'x^2').pass).toBe(true);
   });
 
+  it('unwraps balanced nested groups and preserves escaped braces', () => {
+    const grader: Grader = { kind: 'exact_match', normalize: ['strip_latex'] };
+    expect(gradeCandidate(grader, '\\boxed{\\mathbf{\\frac{1}{2}}}', '\\frac{1}{2}').pass).toBe(
+      true,
+    );
+    expect(gradeCandidate(grader, '\\boxed{a\\}b}', 'a\\}b').pass).toBe(true);
+    expect(gradeCandidate(grader, '\\boxed{\\frac{1}{2}', '\\frac{1}{2}').pass).toBe(false);
+  });
+
+  it('deletes punctuation when explicitly requested', () => {
+    const grader = GraderSchema.parse({
+      kind: 'exact_match',
+      normalize: ['remove_punct', 'lowercase'],
+    });
+    expect(gradeCandidate(grader, 'USA', 'U.S.A.').pass).toBe(true);
+  });
+
   it('throws when no gold reference is supplied', () => {
     expect(() => gradeCandidate({ kind: 'exact_match' }, 'paris')).toThrowError(/gold/i);
   });
@@ -134,6 +156,26 @@ describe('gradeCandidate — exact_match (gold-relative)', () => {
 
 describe('gradeCandidate — set_match', () => {
   const grader: Grader = { kind: 'set_match', expected: ['a', 'b', 'c'] };
+
+  it('accepts mixed delimiters and trailing newlines and preserves case by default', () => {
+    expect(gradeCandidate(grader, 'a,b\nc').pass).toBe(true);
+    expect(gradeCandidate(grader, 'a,b,c\n').pass).toBe(true);
+    expect(gradeCandidate(grader, 'A,b,c').pass).toBe(false);
+  });
+
+  it('normalizes both sides after splitting and preserves commas inside newline elements', () => {
+    const grader = GraderSchema.parse({
+      kind: 'set_match',
+      expected: ['Washington, D.C.', 'Ottawa'],
+      delimiter: 'newline',
+      normalize: ['lowercase'],
+      order_sensitive: true,
+    });
+    expect(gradeCandidate(grader, 'WASHINGTON, D.C.\r\nOTTAWA').pass).toBe(true);
+    expect(gradeCandidate(grader, ['WASHINGTON, D.C.', 'OTTAWA']).pass).toBe(true);
+    expect(gradeCandidate(grader, 'OTTAWA\nWASHINGTON, D.C.').pass).toBe(false);
+    expect(gradeCandidate(grader, '').pass).toBe(false);
+  });
 
   it('passes an unordered match from an array or delimited string', () => {
     expect(gradeCandidate(grader, ['c', 'a', 'b']).pass).toBe(true);
@@ -202,6 +244,91 @@ describe('gradeCandidate — mcq', () => {
 });
 
 describe('gradeCandidate — json_match', () => {
+  it.each([
+    [true, 1],
+    [true, 'invalid'],
+    ['true', 1],
+    [1, 1],
+  ])('rejects async flag %j before executing a validator for %s', ($async, candidate) => {
+    expect(() =>
+      gradeCandidate({ kind: 'json_match', schema: { $async, type: 'number' } }, candidate),
+    ).toThrow(
+      expect.objectContaining({
+        data: expect.objectContaining({ reason: 'grader_unexecutable', field: 'schema' }),
+      }),
+    );
+  });
+
+  it('compares literal prototype-named keys inside arrays', () => {
+    const grader: Grader = {
+      kind: 'json_match',
+      expected: JSON.parse('[{"__proto__":{"marker":1}}]'),
+    };
+    expect(gradeCandidate(grader, JSON.parse('[{"__proto__":{"marker":1}}]')).pass).toBe(true);
+    expect(gradeCandidate(grader, JSON.parse('[{"__proto__":{"marker":2}}]')).pass).toBe(false);
+  });
+
+  it.each([
+    {
+      $schema: 'https://json-schema.org/draft/2019-09/schema',
+      items: [{ type: 'string' }, { type: 'number' }],
+      additionalItems: false,
+    },
+    {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      prefixItems: [{ type: 'string' }, { type: 'number' }],
+      items: false,
+    },
+  ])('honors the declared tuple dialect $schema', (tuple) => {
+    const grader: Grader = { kind: 'json_match', schema: { type: 'array', ...tuple } };
+    expect(gradeCandidate(grader, ['a', 1]).pass).toBe(true);
+    expect(gradeCandidate(grader, ['a', 1, 2]).pass).toBe(false);
+  });
+
+  it('names unknown keywords on PASS and REJECT without leaking diagnostics between schemas', () => {
+    const grader: Grader = {
+      kind: 'json_match',
+      schema: { type: 'number', 'x-note': 'annotation' },
+    };
+    expect(gradeCandidate(grader, 1)).toMatchObject({
+      pass: true,
+      detail: expect.stringContaining('x-note'),
+    });
+    expect(gradeCandidate(grader, 'a')).toMatchObject({
+      pass: false,
+      detail: expect.stringContaining('x-note'),
+    });
+    expect(
+      gradeCandidate({ kind: 'json_match', schema: { type: 'number' } }, 1).detail,
+    ).not.toContain('x-note');
+  });
+
+  it('recompiles a changed schema object without sharing schema IDs across graders', () => {
+    const schema = { $id: 'urn:example:grader', type: 'number' };
+    const grader: Grader = { kind: 'json_match', schema };
+    expect(gradeCandidate(grader, 1).pass).toBe(true);
+    schema.type = 'string';
+    expect(gradeCandidate(grader, 1).pass).toBe(false);
+    expect(
+      gradeCandidate({ kind: 'json_match', schema: { ...schema, type: 'number' } }, 1).pass,
+    ).toBe(true);
+  });
+  it.each([
+    undefined,
+    'http://json-schema.org/draft-07/schema#',
+    'http://json-schema.org/schema#',
+    'http://json-schema.org/schema',
+  ])('preserves draft-07 tuple validation for %s', (dialect) => {
+    const schema = {
+      ...(dialect === undefined ? {} : { $schema: dialect }),
+      type: 'array',
+      items: [{ type: 'string' }, { type: 'number' }],
+      additionalItems: false,
+    };
+    const grader: Grader = { kind: 'json_match', schema };
+    expect(gradeCandidate(grader, ['a', 1]).pass).toBe(true);
+    expect(gradeCandidate(grader, ['a', 1, 2]).pass).toBe(false);
+  });
   it('passes a deep-equal candidate regardless of key order', () => {
     const grader: Grader = { kind: 'json_match', expected: { a: 1, b: [2, 3] } };
     expect(gradeCandidate(grader, { b: [2, 3], a: 1 }).pass).toBe(true);
@@ -263,49 +390,29 @@ describe('gradeCandidate — llm_rubric', () => {
   });
 });
 
-describe('checkSelfConsistency', () => {
-  const grader: Grader = { kind: 'numeric', target: '5/14', rel_tol: 1e-3 };
-
-  it('reports grader_ok when gold + positives pass and the negative is rejected', () => {
-    const sc = checkSelfConsistency(
-      grader,
-      '5/14',
-      ['10/28', '0.357'],
-      ['25/64'],
-      undefined,
+describe('grader input bounds', () => {
+  it.each(['rel_tol', 'abs_tol'])('requires nonnegative %s', (field) => {
+    expect(GraderSchema.safeParse({ kind: 'numeric', target: 0, [field]: -0.1 }).success).toBe(
       false,
     );
-    expect(sc.gold_passes_grader).toBe(true);
-    expect(sc.positives_pass).toEqual([true, true]);
-    expect(sc.negatives_rejected).toEqual([true]);
-    expect(sc.grader_ok).toBe(true);
-    expect(sc.ready_to_submit).toBe(false); // verification not present
+    expect(GraderSchema.safeParse({ kind: 'numeric', target: 0, [field]: 0 }).success).toBe(true);
   });
 
-  it('is not grader_ok when there is no negative case', () => {
-    const sc = checkSelfConsistency(grader, '5/14', [], [], undefined, true);
-    expect(sc.grader_ok).toBe(false);
-  });
-
-  it('ready_to_submit only when grader_ok and verification present', () => {
-    const sc = checkSelfConsistency(grader, '5/14', [], ['25/64'], undefined, true);
-    expect(sc.grader_ok).toBe(true);
-    expect(sc.verification_present).toBe(true);
-    expect(sc.ready_to_submit).toBe(true);
-  });
-
-  it('llm_rubric self-consistency rests on verification presence', () => {
-    const rubric: Grader = {
-      kind: 'llm_rubric',
-      criteria: [{ description: 'x' }],
-      judge_prompt: 'j',
-      pass_threshold: 0.5,
-    };
+  it.each([
+    [-0.1, [1], false],
+    [1.1, [1], false],
+    [0.5, [-1, 1], false],
+    [0.5, [0, 0], false],
+    [0, [0, 1], true],
+    [1, [0, undefined], true],
+  ] as const)('validates rubric threshold %s and weights %j', (pass_threshold, weights, valid) => {
     expect(
-      checkSelfConsistency(rubric, 'gold', [], ['bad'], undefined, false).ready_to_submit,
-    ).toBe(false);
-    expect(checkSelfConsistency(rubric, 'gold', [], ['bad'], undefined, true).ready_to_submit).toBe(
-      true,
-    );
+      GraderSchema.safeParse({
+        kind: 'llm_rubric',
+        criteria: weights.map((weight) => ({ description: 'Criterion', weight })),
+        judge_prompt: 'Grade it.',
+        pass_threshold,
+      }).success,
+    ).toBe(valid);
   });
 });

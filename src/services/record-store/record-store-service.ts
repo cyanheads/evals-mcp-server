@@ -14,6 +14,7 @@ import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/pro
 import { dirname, join } from 'node:path';
 import { type Context, z } from '@cyanheads/mcp-ts-core';
 import {
+  McpError,
   notFound,
   serializationError,
   serviceUnavailable,
@@ -24,6 +25,7 @@ import {
   type Capture,
   CaptureSchema,
   type EvalRecord,
+  EvalRecordSchema,
   RecordObjectSchema,
   type RecordStatus,
   type RecordSummary,
@@ -74,6 +76,24 @@ async function tryFs<T>(operation: string, fn: () => Promise<T>): Promise<T> {
 /** Fields the store regards as semantic for `content_hash` (dedup key). */
 const SEMANTIC_FIELDS = ['task_type', 'prompt', 'context', 'gold', 'grader', 'choices'] as const;
 
+const RECORD_ID = /^ev_[A-Za-z0-9_-]{10}$/;
+
+function missingRecord(id: string) {
+  return notFound(
+    `No eval record with id "${id}". Use evals_list_records to browse existing records.`,
+    { reason: 'not_found', id },
+  );
+}
+
+function invalidRecord(id: string, fields: string[]) {
+  const detail = fields.length ? `invalid fields: ${fields.join(', ')}` : 'invalid JSON';
+  return validationError(`Record "${id}" on disk has ${detail}.`, {
+    reason: 'record_invalid',
+    id,
+    ...(fields.length ? { fields } : {}),
+  });
+}
+
 /**
  * Top-level record keys a surgical patch is forbidden from mutating directly —
  * these are server-owned identity/integrity anchors, or the discriminant.
@@ -86,6 +106,7 @@ const PROTECTED_PATHS = new Set([
   'checksum',
   'submitted_at',
   'provenance.created_at',
+  'captured_outputs',
 ]);
 
 /** Declared array fields whose missing path `append` may create. */
@@ -97,7 +118,6 @@ const DECLARED_ARRAY_PATHS = new Set([
   'verification.evidence',
   'captures',
   'choices',
-  'captured_outputs',
   'grader.normalize',
   'grader.criteria',
 ]);
@@ -137,7 +157,7 @@ export class RecordStoreService {
     const sortKeys = (v: unknown): unknown => {
       if (v === null || typeof v !== 'object') return v;
       if (Array.isArray(v)) return v.map(sortKeys);
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null);
       for (const k of Object.keys(v as Record<string, unknown>).sort())
         out[k] = sortKeys((v as Record<string, unknown>)[k]);
       return out;
@@ -164,6 +184,7 @@ export class RecordStoreService {
   // ---- file paths --------------------------------------------------------
 
   private pathFor(status: RecordStatus, id: string): string {
+    if (!RECORD_ID.test(id)) throw missingRecord(id);
     return join(status === 'draft' ? this.draftsDir : this.submittedDir, `${id}.json`);
   }
 
@@ -189,9 +210,10 @@ export class RecordStoreService {
 
   /** Read a record by id from either drafts/ or submitted/. Returns null when absent. */
   async read(id: string): Promise<EvalRecord | null> {
+    if (!RECORD_ID.test(id)) return null;
     for (const status of ['draft', 'submitted'] as const) {
       const text = await this.readFileOrNull(this.pathFor(status, id));
-      if (text !== null) return this.parseRecord(text, id);
+      if (text !== null) return this.parseRecord(text, id, status);
     }
     return null;
   }
@@ -199,12 +221,7 @@ export class RecordStoreService {
   /** Read a record, throwing `not_found` when absent. */
   async require(id: string): Promise<EvalRecord> {
     const record = await this.read(id);
-    if (!record) {
-      throw notFound(
-        `No eval record with id "${id}". Use evals_list_records to browse existing records.`,
-        { reason: 'not_found', id },
-      );
-    }
+    if (!record) throw missingRecord(id);
     return record;
   }
 
@@ -217,15 +234,24 @@ export class RecordStoreService {
     }
   }
 
-  private parseRecord(text: string, id: string): EvalRecord {
+  private parseRecord(text: string, id: string, status: RecordStatus): EvalRecord {
+    let decoded: unknown;
     try {
-      return JSON.parse(text) as EvalRecord;
-    } catch (err) {
-      throw serializationError(
-        `Record "${id}" on disk is not valid JSON (${(err as Error).message}).`,
-        { id },
-      );
+      decoded = JSON.parse(text);
+    } catch {
+      throw invalidRecord(id, []);
     }
+    const result = EvalRecordSchema.safeParse(decoded);
+    if (!result.success) {
+      const fields = result.error.issues.map((issue) => issue.path.join('.') || '(record)');
+      throw invalidRecord(id, [...new Set(fields)]);
+    }
+    const mismatchedFields: string[] = [];
+    if (result.data.id !== id) mismatchedFields.push('id');
+    if (result.data.status !== status) mismatchedFields.push('status');
+    if (mismatchedFields.length) throw invalidRecord(id, mismatchedFields);
+    // The schema has no transforms or defaults; preserve extensions in validated files for lossless reads and JSONL.
+    return decoded as EvalRecord;
   }
 
   /** Delete a draft by id. Throws `not_found` (unknown id) or `record_frozen` (submitted). */
@@ -320,7 +346,7 @@ export class RecordStoreService {
   }
 
   private assertPatchable(path: string, op: string): void {
-    if (PROTECTED_PATHS.has(path)) {
+    if (PROTECTED_PATHS.has(path) || path.startsWith('captured_outputs.')) {
       const why =
         path === 'task_type'
           ? 'changing the discriminant would invalidate the record; start a new draft instead'
@@ -432,12 +458,16 @@ export class RecordStoreService {
 
   // ---- submit (move + freeze) --------------------------------------------
 
-  /** True when a submitted record with the same content_hash already exists. Returns that record's id, or null. */
-  async findSubmittedDuplicate(contentHash: string, exceptId: string): Promise<string | null> {
-    for (const record of await this.listSubmittedRecords()) {
-      if (record.id !== exceptId && record.content_hash === contentHash) return record.id;
-    }
-    return null;
+  /** Find a matching submitted record and report unreadable records excluded from the scan. */
+  async findSubmittedDuplicate(
+    contentHash: string,
+    exceptId: string,
+  ): Promise<{ duplicateId: string | null; skipped: string[] }> {
+    const { records, skipped } = await this.listSubmittedRecords();
+    const duplicate = records.find(
+      (record) => record.id !== exceptId && record.content_hash === contentHash,
+    );
+    return { duplicateId: duplicate?.id ?? null, skipped };
   }
 
   /**
@@ -483,18 +513,33 @@ export class RecordStoreService {
   }
 
   /** Read every submitted record (used for dedup + export). */
-  listSubmittedRecords(): Promise<EvalRecord[]> {
-    return this.readAll(this.submittedDir);
+  listSubmittedRecords(): Promise<{ records: EvalRecord[]; skipped: string[] }> {
+    return this.readAll('submitted');
   }
 
-  private async readAll(dir: string): Promise<EvalRecord[]> {
+  private async readAll(
+    status: RecordStatus,
+  ): Promise<{ records: EvalRecord[]; skipped: string[] }> {
+    const dir = status === 'draft' ? this.draftsDir : this.submittedDir;
     const ids = await this.listIds(dir);
-    const out: EvalRecord[] = [];
+    const records: EvalRecord[] = [];
+    const skipped: string[] = [];
+    const prefix = status === 'draft' ? 'drafts' : 'submitted';
     for (const id of ids) {
-      const text = await this.readFileOrNull(join(dir, `${id}.json`));
-      if (text !== null) out.push(this.parseRecord(text, id));
+      if (!RECORD_ID.test(id)) {
+        skipped.push(`${prefix}/${id}.json`);
+        continue;
+      }
+      const text = await this.readFileOrNull(this.pathFor(status, id));
+      if (text === null) continue;
+      try {
+        records.push(this.parseRecord(text, id, status));
+      } catch (error) {
+        if (!(error instanceof McpError) || error.data?.reason !== 'record_invalid') throw error;
+        skipped.push(`${prefix}/${id}.json`);
+      }
     }
-    return out;
+    return { records, skipped };
   }
 
   /**
@@ -506,22 +551,22 @@ export class RecordStoreService {
     domain?: string;
     task_type?: string;
     tag?: string;
-    limit: number;
-  }): Promise<{ summaries: RecordSummary[]; total: number; truncated: boolean }> {
-    const dirs: Array<{ status: RecordStatus; dir: string }> = [];
-    if (filter.status === 'draft') dirs.push({ status: 'draft', dir: this.draftsDir });
-    else if (filter.status === 'submitted')
-      dirs.push({ status: 'submitted', dir: this.submittedDir });
-    else {
-      dirs.push(
-        { status: 'draft', dir: this.draftsDir },
-        { status: 'submitted', dir: this.submittedDir },
-      );
-    }
-
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    summaries: RecordSummary[];
+    total: number;
+    truncated: boolean;
+    nextOffset?: number;
+    skipped: string[];
+  }> {
+    const statuses = filter.status ? [filter.status] : (['draft', 'submitted'] as const);
     const matches: RecordSummary[] = [];
-    for (const { dir } of dirs) {
-      for (const record of await this.readAll(dir)) {
+    const skipped: string[] = [];
+    for (const status of statuses) {
+      const scan = await this.readAll(status);
+      for (const file of scan.skipped) skipped.push(file);
+      for (const record of scan.records) {
         if (filter.domain && record.metadata.domain !== filter.domain) continue;
         if (filter.task_type && record.task_type !== filter.task_type) continue;
         if (filter.tag && !record.metadata.tags.includes(filter.tag)) continue;
@@ -537,12 +582,21 @@ export class RecordStoreService {
       }
     }
 
-    matches.sort((a, b) =>
-      a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0,
-    );
+    matches.sort((a, b) => {
+      if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
     const total = matches.length;
-    const truncated = total > filter.limit;
-    return { summaries: matches.slice(0, filter.limit), total, truncated };
+    const offset = filter.offset ?? 0;
+    const end = filter.limit === undefined ? total : offset + filter.limit;
+    const truncated = end < total;
+    return {
+      summaries: matches.slice(offset, end),
+      total,
+      truncated,
+      ...(truncated ? { nextOffset: end } : {}),
+      skipped,
+    };
   }
 
   // ---- exports -----------------------------------------------------------

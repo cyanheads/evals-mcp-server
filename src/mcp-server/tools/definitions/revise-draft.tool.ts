@@ -10,16 +10,13 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import {
-  assertTaskTypeConstraints,
-  hasRecordedVerification,
-} from '@/services/eval-record/record-builder.js';
+import { assertTaskTypeConstraints } from '@/services/eval-record/record-builder.js';
 import {
   EvalRecordSchema,
   RecordPayloadSchema,
   SelfConsistencySchema,
 } from '@/services/eval-record/schema.js';
-import { checkSelfConsistency } from '@/services/grader/grader-service.js';
+import { checkDraft } from '@/services/eval-record/submit-gate.js';
 import { getRecordStoreService } from '@/services/record-store/record-store-service.js';
 
 export const reviseDraftTool = tool('evals_revise_draft', {
@@ -73,6 +70,13 @@ export const reviseDraftTool = tool('evals_revise_draft', {
       .describe('The re-run self-consistency result after the patch.'),
   }),
   errors: [
+    {
+      reason: 'record_invalid',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The stored draft could not be decoded as a valid record.',
+      recovery: 'Repair the named record file, then retry.',
+      thrownBy: 'service',
+    },
     {
       reason: 'grader_unexecutable',
       code: JsonRpcErrorCode.ValidationError,
@@ -139,14 +143,7 @@ export const reviseDraftTool = tool('evals_revise_draft', {
     const validated = EvalRecordSchema.parse(patched);
     assertTaskTypeConstraints(validated);
 
-    const checks = checkSelfConsistency(
-      validated.grader,
-      validated.gold,
-      validated.discrimination.positive,
-      validated.discrimination.negative,
-      validated.choices,
-      hasRecordedVerification(validated),
-    );
+    const { checks } = checkDraft(validated);
     await store.writeDraft(validated, ctx);
 
     ctx.log.info('Revised draft', {
@@ -170,8 +167,11 @@ export const reviseDraftTool = tool('evals_revise_draft', {
       '',
       `**self-consistency:** grader_ok=${sc.grader_ok}, verification_present=${sc.verification_present}, ready_to_submit=${sc.ready_to_submit}`,
     );
+    if ((result.record as { grader?: { kind?: string } }).grader?.kind === 'llm_rubric') {
+      lines.push('Gold and discrimination: not graded (llm_rubric).');
+    }
     lines.push(
-      `gold passes: ${sc.gold_passes_grader} · positives: ${sc.positives_pass.filter(Boolean).length}/${sc.positives_pass.length} · negatives rejected: ${sc.negatives_rejected.filter(Boolean).length}/${sc.negatives_rejected.length}`,
+      `gold_passes_grader: ${sc.gold_passes_grader} · positives_pass: [${sc.positives_pass.join(', ')}] · negatives_rejected: [${sc.negatives_rejected.join(', ')}]`,
     );
     lines.push('', '**updated record:**', '```json', JSON.stringify(result.record, null, 2), '```');
     return [{ type: 'text', text: lines.join('\n') }];

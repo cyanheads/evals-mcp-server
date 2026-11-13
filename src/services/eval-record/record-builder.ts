@@ -11,6 +11,7 @@
 
 import { validationError } from '@cyanheads/mcp-ts-core/errors';
 import type { EvalRecord, Grader, TaskType } from '@/services/eval-record/schema.js';
+import type { GateFailure } from '@/services/eval-record/submit-gate.js';
 import { gradeCandidate, type SelfConsistency } from '@/services/grader/grader-service.js';
 import { getRecordStoreService } from '@/services/record-store/record-store-service.js';
 
@@ -136,11 +137,6 @@ export function buildDraft(
   return draft;
 }
 
-/** True when the record carries at least one verification evidence entry. */
-export function hasRecordedVerification(record: EvalRecord): boolean {
-  return record.verification.evidence.length > 0;
-}
-
 /** Render a gold value compactly for the parrot-back (with the numeric resolution when known). */
 function renderGold(record: EvalRecord, resolved: unknown): string {
   const gold = typeof record.gold === 'object' ? JSON.stringify(record.gold) : String(record.gold);
@@ -173,7 +169,7 @@ function renderGrader(grader: Grader, resolved: unknown): string {
     case 'exact_match':
       return `exact_match${grader.normalize?.length ? `, normalize=[${grader.normalize.join(', ')}]` : ''}`;
     case 'set_match':
-      return `set_match, expected={${grader.expected.join(', ')}}${grader.order_sensitive ? ', ordered' : ''}`;
+      return `set_match, expected={${grader.expected.join(', ')}}${grader.order_sensitive ? ', ordered' : ''}${grader.delimiter ? `, delimiter=${grader.delimiter}` : ''}${grader.normalize?.length ? `, normalize=[${grader.normalize.join(', ')}]` : ''}`;
     case 'regex':
       return `regex, /${grader.pattern}/${grader.flags ?? ''}`;
     case 'mcq':
@@ -221,13 +217,13 @@ export function renderDraftReview(
   );
   const negStatus = checks.negatives_rejected;
   lines.push(
-    `negative:   ${record.discrimination.negative.map((n, i) => `${typeof n === 'object' ? JSON.stringify(n) : String(n)}${negStatus[i] ? ' (rejected ✓)' : ' (NOT rejected ✗)'}`).join(', ') || '(none — required before submit)'}`,
+    `negative:   ${record.discrimination.negative.map((n, i) => `${typeof n === 'object' ? JSON.stringify(n) : String(n)}${record.grader.kind === 'llm_rubric' ? '' : negStatus[i] ? ' (rejected ✓)' : ' (NOT rejected ✗)'}`).join(', ') || '(none — required before submit)'}`,
   );
   lines.push(`domain:     ${record.metadata.domain}`);
   lines.push('─────────────────────────────────────────────────────────────────────', '');
   lines.push(reviewProtocol, '');
   lines.push('RECOMMENDED — independent verification via a subagent:');
-  lines.push('Spawn a subagent (Sonnet-tier is sufficient), connected to this server, with the');
+  lines.push('Spawn a fresh reviewer, connected to this server, with the');
   lines.push('prompt below. It reviews the draft and reports back; then apply surgical fixes with');
   lines.push('evals_revise_draft and finalize with evals_submit_draft.', '');
   lines.push('  ┌─ subagent prompt ─────────────────────────────────────────────────┐');
@@ -242,36 +238,14 @@ export function renderDraftReview(
 export const REVIEW_PROTOCOL =
   'Work through each line above. For every field ask: is it accurate, unambiguous, and complete? Verify anything checkable against live or authoritative sources — do not trust memory.';
 
-/** Build the ready-to-paste subagent verification prompt for a specific draft id. */
-export function buildSubagentPrompt(id: string): string {
-  return [
-    `Verify draft eval record ${id}. Call evals_get_record with id "${id}".`,
-    'For each field check accuracy (verify claims against live sources), ambiguity, and gaps.',
-    'Independently re-derive or look up the gold (use evals_run_check to re-derive deterministically).',
-    'Report CONCISELY: one bullet per issue (field, problem, suggested fix), or "no issues".',
-    'Do NOT modify the record — the authoring agent will apply surgical updates.',
-  ].join('\n');
+/** Give the reviewer the task before exposing the saved reference answer. */
+export function buildSubagentPrompt(record: EvalRecord): string {
+  const task = { prompt: record.prompt, context: record.context, choices: record.choices };
+  return `Independently solve this task or look up its answer in authoritative sources before reading the saved gold or grader: ${JSON.stringify(task)}\nThen call evals_get_record with id "${record.id}" and compare your result with the record. Use evals_run_check to test agreement, not as independent evidence that the saved reference is correct.\nCheck each field for accuracy, ambiguity, and gaps. Report your method, computed answer or source citation, and one concise bullet per issue (field, problem, suggested fix), or "no issues". Do not modify the record; the authoring agent will apply the findings.`;
 }
 
-/** Build the `required_before_submit` checklist from the current self-consistency state. */
-export function buildRequiredBeforeSubmit(checks: SelfConsistency, record: EvalRecord): string[] {
-  const items: string[] = [];
-  if (!checks.verification_present) {
-    items.push(
-      'An independent verification recorded on the record (the subagent report, or your own decorrelated check) — append it to verification.evidence.',
-    );
-  }
-  if (record.discrimination.negative.length === 0) {
-    items.push(
-      'At least one negative case in discrimination.negative that the grader correctly rejects.',
-    );
-  }
-  if (!checks.gold_passes_grader && record.grader.kind !== 'llm_rubric') {
-    items.push('Fix the gold or grader — the gold does not currently pass its own grader.');
-  }
-  if (items.length === 0)
-    items.push(
-      'Ready: grader is self-consistent and a verification is recorded. Run evals_submit_draft to finalize.',
-    );
-  return items;
+/** Build the `required_before_submit` checklist from the draft-local checks. */
+export function buildRequiredBeforeSubmit(failures: GateFailure[]): string[] {
+  if (failures.length > 0) return failures.map(({ message }) => message);
+  return ['Ready: draft checks passed. Run evals_submit_draft to finalize.'];
 }

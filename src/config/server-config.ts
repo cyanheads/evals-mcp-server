@@ -32,7 +32,7 @@ const ServerConfigSchema = z.object({
     .string()
     .optional()
     .describe(
-      'Directory of framework-written tool-call captures. When set, captures EvalsIDs resolve to full dumps.',
+      'Directory of tool-call capture files; referenced EvalsIDs resolve to full dumps at submit.',
     ),
 });
 

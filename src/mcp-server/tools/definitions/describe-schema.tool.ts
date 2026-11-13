@@ -28,7 +28,8 @@ const TASK_TYPE_GUIDE: Record<
   },
   set_answer: {
     summary: 'A set of elements, graded for set membership (ordered or unordered).',
-    goldShape: 'An array of strings (or a comma/newline-delimited string).',
+    goldShape:
+      'An array of strings or a delimited string. set_match can normalize each element and select a comma-only or newline-only delimiter.',
     graderKinds: ['set_match'],
     extraRequired: [],
   },
@@ -46,7 +47,8 @@ const TASK_TYPE_GUIDE: Record<
   },
   json_answer: {
     summary: 'A structured JSON answer, graded by deep-equality and/or JSON Schema.',
-    goldShape: 'Any JSON-serializable value; the grader carries expected and/or schema.',
+    goldShape:
+      'Any JSON-serializable value; the grader carries expected and/or schema. A schema can declare draft-07, 2019-09, or 2020-12 and defaults to draft-07.',
     graderKinds: ['json_match'],
     extraRequired: [],
   },

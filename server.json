@@ -37,7 +37,7 @@
         },
         {
           "name": "EVALS_CAPTURE_DIR",
-          "description": "Directory of framework-written tool-call captures; when set, captures EvalsIDs resolve to full dumps.",
+          "description": "Directory of tool-call capture files; referenced EvalsIDs resolve to full dumps at submit.",
           "format": "string",
           "isRequired": false
         },
@@ -116,7 +116,7 @@
         },
         {
           "name": "EVALS_CAPTURE_DIR",
-          "description": "Directory of framework-written tool-call captures; when set, captures EvalsIDs resolve to full dumps.",
+          "description": "Directory of tool-call capture files; referenced EvalsIDs resolve to full dumps at submit.",
           "format": "string",
           "isRequired": false
         },

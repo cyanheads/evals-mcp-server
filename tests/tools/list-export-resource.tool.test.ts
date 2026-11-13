@@ -8,10 +8,10 @@
  * @module tests/tools/list-export-resource.tool.test
  */
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetServerConfig } from '@/config/server-config.js';
 import {
@@ -149,29 +149,170 @@ describe('evals_list_records', () => {
     expect(() => listRecordsTool.input.parse({ limit: 1.5 })).toThrow();
   });
 
+  it('pages by timestamp then ID and distinguishes a past-end offset from an empty corpus', async () => {
+    const store = getRecordStoreService();
+    const first = (await store.listSummaries({ status: 'draft', limit: 1 })).summaries[0]!;
+    const base = await store.require(first.id);
+    const ids = ['ev_page000000', 'ev_page000001', 'ev_page000002'];
+    for (const id of ids.toReversed()) {
+      const record = { ...base, id, metadata: { domain: 'page-test', tags: [] } };
+      if (id === ids[0]) await store.promoteToSubmitted(record, ctx);
+      else await store.writeDraft(record, ctx);
+    }
+    try {
+      const page = await runToolContract(listRecordsTool, {
+        domain: 'page-test',
+        offset: 0,
+        limit: 2,
+      });
+      expect(page.structuredContent).toMatchObject({
+        records: [{ id: ids[0] }, { id: ids[1] }],
+        totalCount: 3,
+        shown: 2,
+        cap: 2,
+        truncated: true,
+        nextOffset: 2,
+      });
+      expect(page.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ text: expect.stringContaining('nextOffset') }),
+        ]),
+      );
+      const last = await runToolContract(listRecordsTool, {
+        domain: 'page-test',
+        offset: 2,
+        limit: 2,
+      });
+      expect(last.structuredContent).toMatchObject({
+        records: [{ id: ids[2] }],
+        totalCount: 3,
+        truncated: false,
+      });
+      expect(last.structuredContent).not.toHaveProperty('nextOffset');
+      const past = await runToolContract(listRecordsTool, {
+        domain: 'page-test',
+        offset: 5,
+        limit: 2,
+      });
+      expect(past.structuredContent).toMatchObject({
+        records: [],
+        totalCount: 3,
+        truncated: false,
+      });
+      expect(past.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ text: expect.stringContaining('offset') }),
+        ]),
+      );
+      expect(past.structuredContent).not.toHaveProperty('nextOffset');
+      expect((await runToolContract(listRecordsTool, { offset: -1 })).isError).toBe(true);
+    } finally {
+      for (const id of ids)
+        await rm(join(dataDir, id === ids[0] ? 'submitted' : 'drafts', `${id}.json`), {
+          force: true,
+        });
+    }
+  });
+
+  it('discloses malformed submitted files on list, export, and successful submit', async () => {
+    const badFile = 'ev_bad000000.json';
+    const path = join(dataDir, 'submitted', badFile);
+    await writeFile(path, '{not json');
+    try {
+      const listed = await runToolContract(listRecordsTool, {
+        status: 'submitted',
+        domain: 'missing',
+      });
+      const exported = await runToolContract(exportRecordsTool, {
+        format: 'jsonl',
+        domain: 'missing',
+      });
+      await expect(
+        seedSubmitted({ prompt: 'Browse A', domain: 'math.probability', tags: [] }),
+      ).rejects.toMatchObject({ data: { reason: 'duplicate' } });
+      const created = await createDraftTool.handler(
+        createDraftTool.input.parse({
+          task_type: 'numeric',
+          prompt: 'Distinct submit',
+          gold: 5,
+          grader: { kind: 'numeric', target: 5 },
+          discrimination: { positive: [], negative: ['401'] },
+          metadata: { domain: 'synthetic', tags: [] },
+          verification: {
+            method: 'independent_derivation',
+            evidence: [{ type: 'note', text: 'checked' }],
+          },
+        }),
+        createCtx,
+      );
+      const submitted = await runToolContract(submitDraftTool, { draft_id: created.draft_id });
+      for (const result of [listed, exported, submitted]) {
+        expect(result.isError).not.toBe(true);
+        expect(result.structuredContent).toMatchObject({
+          notice: expect.stringContaining(badFile),
+        });
+        expect(result.content).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ text: expect.stringContaining(badFile) }),
+          ]),
+        );
+      }
+      expect(listed.structuredContent).toMatchObject({
+        totalCount: 0,
+        notice: expect.stringContaining('No records matched'),
+      });
+      expect(exported.structuredContent).toMatchObject({
+        record_count: 0,
+        notice: expect.stringContaining('No submitted records matched'),
+      });
+      await rm(join(dataDir, 'submitted', `${created.draft_id}.json`), { force: true });
+    } finally {
+      await rm(path, { force: true });
+    }
+  });
+
   it('returns more than 500 summaries and preserves requested truncation and empty results', async () => {
     const store = getRecordStoreService();
     const first = (await store.listSummaries({ status: 'draft', limit: 1 })).summaries[0]!;
     const base = await store.require(first.id);
-    for (let index = 0; index < 502; index++)
-      await store.writeDraft(
-        { ...base, id: `ev_large_${index}`, metadata: { domain: 'large', tags: [] } },
-        ctx,
+    const ids = Array.from({ length: 502 }, (_, index) => `ev_${String(index).padStart(10, '0')}`);
+    for (let offset = 0; offset < ids.length; offset += 16) {
+      await Promise.all(
+        ids.slice(offset, offset + 16).map((id) =>
+          writeFile(
+            join(dataDir, 'drafts', `${id}.json`),
+            JSON.stringify({
+              ...base,
+              id,
+              metadata: { domain: 'large', tags: [] },
+            }),
+          ),
+        ),
       );
+    }
     const listCtx = createMockContext();
     const result = await listRecordsTool.handler(
       listRecordsTool.input.parse({ domain: 'large', limit: 501 }),
       listCtx,
     );
-    expect(result.records).toHaveLength(501);
+    expect(result.records.map(({ id }) => id)).toEqual(ids.slice(0, 501));
     expect(getEnrichment(listCtx)).toMatchObject({ totalCount: 502, cap: 501, truncated: true });
     const all = await listRecordsTool.handler(
       listRecordsTool.input.parse({ domain: 'large', limit: 502 }),
       createMockContext(),
     );
-    expect(all.records).toHaveLength(502);
+    expect(all.records.map(({ id }) => id)).toEqual(ids);
     const text = (listRecordsTool.format!(all)[0] as { text: string }).text;
     for (const record of all.records) expect(text).toContain(record.id);
+    const discovered = await listEvalRecordResources();
+    const byUri = new Map(discovered.resources.map((resource) => [resource.uri, resource]));
+    for (const id of ids) {
+      expect(byUri.get(`eval://record/${id}`)).toEqual({
+        uri: `eval://record/${id}`,
+        name: `${id} (draft)`,
+        title: 'eval-record',
+      });
+    }
     expect(
       (
         await listRecordsTool.handler(
@@ -184,7 +325,7 @@ describe('evals_list_records', () => {
 
   it('format() renders a bullet line per record and an empty-state line', () => {
     const empty = listRecordsTool.format!({ records: [] });
-    expect((empty[0] as { text: string }).text).toContain('No records matched');
+    expect((empty[0] as { text: string }).text).toContain('No records on this page');
   });
 });
 
@@ -240,7 +381,8 @@ describe('evals_export_records', () => {
       ctx,
     );
     const ins = JSON.parse(await readFile(inspect.path, 'utf8'));
-    expect(ins.samples[0].scorer).toBe('match_numeric');
+    expect(ins).toHaveLength(2);
+    expect(ins[0].grader_spec.kind).toBe('numeric');
   });
 
   it('rejects an unknown format at the Zod boundary', () => {

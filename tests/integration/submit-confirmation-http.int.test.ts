@@ -159,7 +159,12 @@ async function openSession(endpoint: string) {
     throw new Error(`tools/call ${name} (id ${id}) ended without a response.`);
   }
 
-  return { acknowledged: acknowledged.status, callTool, initialized, sessionId };
+  async function listResources() {
+    const id = nextId++;
+    return responseTo(await post({ id, method: 'resources/list' }), id);
+  }
+
+  return { acknowledged: acknowledged.status, callTool, initialized, listResources, sessionId };
 }
 
 type Session = Awaited<ReturnType<typeof openSession>>;
@@ -234,6 +239,25 @@ describe.each([
     });
     expect(session.sessionId).toEqual(expect.stringMatching(/\S/));
     expect(session.acknowledged).toBe(202);
+  });
+
+  it('lists record URIs with their established display title', async () => {
+    const session = await openSession(`${base}/mcp`);
+    const id = await createReadyDraft(session, 'Resource list display title');
+
+    expect(await session.listResources()).toMatchObject({
+      result: {
+        resources: expect.arrayContaining([
+          {
+            uri: `eval://record/${id}`,
+            name: `${id} (draft)`,
+            title: 'eval-record',
+            description: expect.any(String),
+            mimeType: 'application/json',
+          },
+        ]),
+      },
+    });
   });
 
   it('sends elicitation/create for confirm: true and submits on accept', async () => {

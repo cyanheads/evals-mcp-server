@@ -32,11 +32,11 @@ export type TaskType = z.infer<typeof TaskTypeSchema>;
 // Grader DSL (typed union)
 // ---------------------------------------------------------------------------
 
-/** A normalization op applied by the `exact_match` grader before comparison. */
+/** A normalization op applied before string comparison. */
 export const NormalizeOpSchema = z
-  .enum(['trim', 'lowercase', 'strip_punct', 'strip_latex'])
+  .enum(['trim', 'lowercase', 'strip_punct', 'strip_latex', 'remove_punct'])
   .describe(
-    'A normalization step applied before comparison: trim whitespace, lowercase, strip punctuation, or strip LaTeX wrappers ($, \\(, \\text{}).',
+    'A normalization step: collapse whitespace, lowercase, replace ASCII punctuation with spaces (strip_punct), delete ASCII punctuation (remove_punct), or strip LaTeX wrappers ($, \\(, \\text{}).',
   );
 
 export const NumericGraderSchema = z
@@ -58,11 +58,16 @@ export const NumericGraderSchema = z
       ),
     rel_tol: z
       .number()
+      .nonnegative()
       .optional()
       .describe(
         'Relative tolerance for the comparison (e.g. 1e-6). Defaults to 1e-9 when both tolerances are omitted.',
       ),
-    abs_tol: z.number().optional().describe('Absolute tolerance for the comparison (e.g. 1e-3).'),
+    abs_tol: z
+      .number()
+      .nonnegative()
+      .optional()
+      .describe('Absolute tolerance for the comparison (e.g. 1e-3).'),
     units: z
       .string()
       .optional()
@@ -92,6 +97,18 @@ export const SetMatchGraderSchema = z
     expected: z
       .array(z.string())
       .describe('The expected set of string elements the candidate must contain.'),
+    normalize: z
+      .array(NormalizeOpSchema)
+      .optional()
+      .describe(
+        'Normalization steps applied to each expected and candidate element before comparison.',
+      ),
+    delimiter: z
+      .enum(['comma', 'newline'])
+      .optional()
+      .describe(
+        'Split string candidates on commas or newlines. When omitted, either character is a separator. Array candidates retain their element boundaries.',
+      ),
     order_sensitive: z
       .boolean()
       .optional()
@@ -140,7 +157,7 @@ export const JsonMatchGraderSchema = z
       .record(z.string(), z.unknown())
       .optional()
       .describe(
-        'A JSON Schema object the candidate must structurally satisfy (validated by ajv at runtime).',
+        'A synchronous JSON Schema object the candidate must satisfy. Declare draft-07, 2019-09, or 2020-12 with $schema. Defaults to draft-07.',
       ),
   })
   .describe('JSON deep-equality and/or JSON-Schema grader.');
@@ -150,8 +167,11 @@ export const CriterionSchema = z
     description: z.string().describe('What the judge checks for this criterion.'),
     weight: z
       .number()
+      .nonnegative()
       .optional()
-      .describe('Relative weight in the weighted pass score (default 1).'),
+      .describe(
+        'Relative weight in the pass score (default 1). Zero allows diagnostic feedback without contributing to the score.',
+      ),
   })
   .describe('A single weighted rubric criterion.');
 
@@ -165,11 +185,21 @@ export const LlmRubricGraderSchema = z
     criteria: z
       .array(CriterionSchema)
       .min(1)
-      .describe('The weighted criteria the judge evaluates the candidate against.'),
+      .describe(
+        'The weighted criteria the judge evaluates. At least one must have a positive weight, counting omitted weights as 1.',
+      ),
     judge_prompt: z
       .string()
       .describe('Instructions for the judge model on how to apply the criteria.'),
-    pass_threshold: z.number().describe('Minimum weighted score (0..1) for the candidate to PASS.'),
+    pass_threshold: z
+      .number()
+      .min(0)
+      .max(1)
+      .describe('Minimum weighted score (0..1) for the candidate to PASS.'),
+  })
+  .refine(({ criteria }) => criteria.some(({ weight }) => (weight ?? 1) > 0), {
+    path: ['criteria'],
+    message: 'At least one rubric criterion must have a positive effective weight.',
   })
   .describe('LLM-rubric grader for free_response.');
 
@@ -451,20 +481,32 @@ export const RecordPayloadSchema = z
 
 /** The self-consistency check result shared by create + revise responses. */
 export const SelfConsistencySchema = z.object({
-  gold_passes_grader: z.boolean().describe('True when the gold passes its own grader.'),
-  positives_pass: z.array(z.boolean()).describe('Per-positive pass verdict, in declaration order.'),
+  gold_passes_grader: z
+    .boolean()
+    .describe('True when the gold passes its grader. False for an ungraded llm_rubric.'),
+  positives_pass: z
+    .array(z.boolean())
+    .describe(
+      'Per-positive pass verdict in declaration order. For llm_rubric, false denotes a skipped verdict.',
+    ),
   negatives_rejected: z
     .array(z.boolean())
-    .describe('Per-negative rejection verdict (true = correctly rejected), in declaration order.'),
+    .describe(
+      'Per-negative rejection verdict in declaration order. For llm_rubric, false denotes a skipped verdict.',
+    ),
   grader_ok: z
     .boolean()
-    .describe('True when gold + all positives pass and all negatives (≥1) are rejected.'),
+    .describe(
+      'True when gold and all positives pass and all negatives (≥1) are rejected. False for an ungraded llm_rubric.',
+    ),
   verification_present: z
     .boolean()
     .describe('True when at least one verification.evidence entry exists.'),
   ready_to_submit: z
     .boolean()
-    .describe('True only when both grader_ok and verification_present are true.'),
+    .describe(
+      'True when the draft passes local submission checks. Confirmation, captures, and duplicates are checked at submit.',
+    ),
 });
 
 /** The reusable input shape for the optional draft-time verification block. */

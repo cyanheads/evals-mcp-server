@@ -9,16 +9,21 @@
 
 import { resource, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { logger } from '@cyanheads/mcp-ts-core/utils';
 import { RecordObjectSchema } from '@/services/eval-record/schema.js';
 import { getRecordStoreService } from '@/services/record-store/record-store-service.js';
 
 /** List the records currently available through the eval:// resource surface. */
 export async function listEvalRecordResources() {
-  const { summaries } = await getRecordStoreService().listSummaries({ limit: 100 });
+  const { summaries, skipped } = await getRecordStoreService().listSummaries({});
+  if (skipped.length) {
+    logger.warning(`Resource discovery skipped invalid record files: ${skipped.join(', ')}.`);
+  }
   return {
     resources: summaries.map((summary) => ({
       uri: `eval://record/${summary.id}`,
       name: `${summary.id} (${summary.status})`,
+      title: 'eval-record',
     })),
   };
 }
@@ -30,10 +35,19 @@ export const evalRecordResource = resource('eval://record/{id}', {
     'A single draft or submitted eval record by id — the same payload evals_get_record returns, for resource-capable clients.',
   mimeType: 'application/json',
   params: z.object({
-    id: z.string().describe('The record id, e.g. "ev_7Qk2mNpXa".'),
+    id: z
+      .string()
+      .describe('The record id returned by an authoring response or evals_list_records.'),
   }),
   output: RecordObjectSchema,
   errors: [
+    {
+      reason: 'record_invalid',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The stored file could not be decoded as a valid record.',
+      recovery: 'Repair the named record file, then retry.',
+      thrownBy: 'service',
+    },
     {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,

@@ -23,11 +23,12 @@ import { getRecordStoreService } from '@/services/record-store/record-store-serv
 /** Resolve captures from EVALS_CAPTURE_DIR, embed dumps, lift source URLs, cross-check gold. */
 async function resolveCaptures(record: EvalRecord, ctx: Context): Promise<EvalRecord> {
   const store = getRecordStoreService();
-  if (!record.captures || record.captures.length === 0 || !store.captureEnabled) return record;
+  const { captured_outputs: _storedDumps, ...draft } = record;
+  if (!draft.captures?.length || !store.captureEnabled) return draft;
 
   const dumps: Capture[] = [];
   const liftedSources = [...(record.metadata.source_provenance ?? [])];
-  for (const id of record.captures) {
+  for (const id of draft.captures) {
     const capture = await store.resolveCapture(id);
     if (capture === null) {
       throw validationError(
@@ -63,7 +64,7 @@ async function resolveCaptures(record: EvalRecord, ctx: Context): Promise<EvalRe
   }
 
   return {
-    ...record,
+    ...draft,
     captured_outputs: dumps,
     metadata: { ...record.metadata, source_provenance: liftedSources },
   };
@@ -84,7 +85,7 @@ const SubmitConsentSchema = z.object({
 export const submitDraftTool = tool('evals_submit_draft', {
   title: 'evals-mcp-server: submit draft',
   description:
-    'Finalize a draft through the committability gate. The server runs deterministic graders against the gold (must PASS), rejects ≥1 declared negative case, requires a recorded, decorrelated independent verification that agrees with the gold, embeds any resolved captures, and checks for duplicates; on pass it flips the record to submitted, stamps submitted_at and a checksum, and freezes it. It refuses with a typed error otherwise and the record stays a draft. For free_response, llm_rubric is not executable by this server; the record is admitted on recorded independent verification and flagged server_verified=false.',
+    'Finalize and freeze a draft after verification, capture resolution, and duplicate checks. Deterministic graders must pass the gold and every positive and reject every negative. All drafts require at least one negative case and recorded independent verification that agrees with the gold. Free-response rubric verdicts are skipped and server_verified is false. On failure the record stays a draft.',
   annotations: {
     readOnlyHint: false,
     idempotentHint: true,
@@ -129,7 +130,17 @@ export const submitDraftTool = tool('evals_submit_draft', {
       .describe('The decorrelation provenance the gate accepted.'),
     frozen: z.literal(true).describe('Always true — the record is now immutable.'),
   }),
+  enrichment: {
+    notice: z.string().optional().describe('Diagnostics for an incomplete duplicate scan.'),
+  },
   errors: [
+    {
+      reason: 'record_invalid',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The stored draft could not be decoded as a valid record.',
+      recovery: 'Repair the named record file, then retry.',
+      thrownBy: 'service',
+    },
     {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
@@ -160,9 +171,16 @@ export const submitDraftTool = tool('evals_submit_draft', {
       thrownBy: 'service',
     },
     {
+      reason: 'positive_case_failed',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'A declared positive case failed the deterministic grader.',
+      recovery: 'Fix the grader or the identified positive case, then retry.',
+      thrownBy: 'service',
+    },
+    {
       reason: 'verification_disagrees_with_gold',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'A recorded independent verification computed a value that disagrees with the gold.',
+      when: 'A verification check failed or an independent value disagrees with the gold.',
       recovery:
         'Reconcile the gold with the independent computation — fix whichever is wrong — then retry.',
     },
@@ -221,13 +239,14 @@ export const submitDraftTool = tool('evals_submit_draft', {
 
     const store = getRecordStoreService();
     const cfg = getServerConfig();
+    const requiresConfirmation = cfg.requireConfirmation || input.confirm;
     const existing = await store.require(input.draft_id);
     if (existing.status === 'submitted') {
       throw ctx.fail('record_frozen', `Record "${input.draft_id}" is already submitted.`);
     }
 
     /** Consent authorizes this caller and the entire current draft, including verification. */
-    if (cfg.requireConfirmation || input.confirm) {
+    if (requiresConfirmation) {
       const expected = {
         operation: 'evals_submit_draft' as const,
         clientId: ctx.auth?.clientId ?? '',
@@ -303,6 +322,8 @@ export const submitDraftTool = tool('evals_submit_draft', {
       switch (reason) {
         case 'grader_failed_on_gold':
           throw ctx.fail('grader_failed_on_gold', message, data);
+        case 'positive_case_failed':
+          throw ctx.fail('positive_case_failed', message, data);
         case 'missing_negative_case':
           throw ctx.fail('missing_negative_case', message, data);
         case 'negative_case_passed':
@@ -324,6 +345,11 @@ export const submitDraftTool = tool('evals_submit_draft', {
 
     // Freeze (promoteToSubmitted always stamps checksum + submitted_at).
     const { record: frozen, path } = await store.promoteToSubmitted(gate.value.record, ctx);
+    if (gate.value.skipped.length) {
+      ctx.enrich.notice(
+        `Duplicate scan skipped invalid record files: ${gate.value.skipped.join(', ')}.`,
+      );
+    }
 
     ctx.log.notice('Submitted eval record', {
       id: frozen.id,

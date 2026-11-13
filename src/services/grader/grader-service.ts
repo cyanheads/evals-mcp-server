@@ -10,9 +10,10 @@
  */
 
 import { validationError } from '@cyanheads/mcp-ts-core/errors';
-import { Ajv } from 'ajv';
 import { all, create, type MathJsInstance } from 'mathjs';
 import type { Grader } from '@/services/eval-record/schema.js';
+import { compileJsonSchema } from '@/services/grader/json-schema-validator.js';
+import { stripLatex } from '@/services/grader/strip-latex.js';
 
 /** Per-candidate grading verdict. */
 export interface GradeResult {
@@ -54,8 +55,6 @@ math.import(
   },
   { override: true },
 );
-
-const ajv = new Ajv({ allErrors: true, strict: false });
 
 /** Convert only finite real math.js scalars; units and collections have no numeric comparison. */
 function realScalar(value: unknown): number | undefined {
@@ -122,19 +121,24 @@ function candidateToNumber(candidate: unknown): number | undefined {
 }
 
 const STRIP_PUNCT = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/g;
-const STRIP_LATEX = /\\(?:text|mathrm|mathbf|boxed)\{([^}]*)\}|\$+|\\[()[\]]|\\,|\\;/g;
 
 /** Apply the `exact_match` normalization pipeline. */
-function normalizeString(input: string, ops: readonly string[] | undefined): string {
+function normalizeString(
+  input: string,
+  ops: Extract<Grader, { kind: 'exact_match' }>['normalize'],
+): string {
   const opList = ops ?? [];
   let s = input;
   for (const op of opList) {
     switch (op) {
       case 'strip_latex':
-        s = s.replace(STRIP_LATEX, '$1');
+        s = stripLatex(s);
         break;
       case 'strip_punct':
         s = s.replace(STRIP_PUNCT, ' ');
+        break;
+      case 'remove_punct':
+        s = s.replace(STRIP_PUNCT, '');
         break;
       case 'lowercase':
         s = s.toLowerCase();
@@ -151,16 +155,17 @@ function normalizeString(input: string, ops: readonly string[] | undefined): str
 }
 
 /** Coerce a candidate to an array of trimmed string elements (accepts an array or a comma/newline-delimited string). */
-function toElementSet(candidate: unknown): string[] | undefined {
-  if (Array.isArray(candidate))
-    return candidate.map((v) => String(v).trim()).filter((v) => v.length > 0);
+function toElementSet(
+  candidate: unknown,
+  delimiter: Extract<Grader, { kind: 'set_match' }>['delimiter'],
+): string[] | undefined {
   if (typeof candidate === 'string') {
-    return candidate
-      .split(/[,\n]/)
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
+    candidate = candidate.split(
+      delimiter === 'comma' ? ',' : delimiter === 'newline' ? '\n' : /[,\n]/,
+    );
   }
-  return;
+  if (!Array.isArray(candidate)) return;
+  return candidate.map((value) => String(value).trim()).filter((value) => value.length > 0);
 }
 
 /** Stable, key-sorted JSON for deep-equality comparison. */
@@ -175,7 +180,7 @@ function canonicalJson(value: unknown): string {
       });
     seen.add(v as object);
     if (Array.isArray(v)) return v.map(sortKeys);
-    const out: Record<string, unknown> = {};
+    const out: Record<string, unknown> = Object.create(null);
     for (const k of Object.keys(v as Record<string, unknown>).sort())
       out[k] = sortKeys((v as Record<string, unknown>)[k]);
     return out;
@@ -251,8 +256,14 @@ export function gradeCandidate(
     }
 
     case 'set_match': {
-      const expected = grader.expected;
-      const got = toElementSet(candidate);
+      const { normalize } = grader;
+      const expected = normalize?.length
+        ? grader.expected.map((value) => normalizeString(value, normalize))
+        : grader.expected;
+      const elements = toElementSet(candidate, grader.delimiter);
+      const got = normalize?.length
+        ? elements?.map((value) => normalizeString(value, normalize))
+        : elements;
       if (got === undefined)
         return {
           pass: false,
@@ -265,7 +276,7 @@ export function gradeCandidate(
       } else {
         const a = new Set(got);
         const b = new Set(expected);
-        pass = a.size === b.size && [...b].every((v) => a.has(v));
+        pass = a.size === b.size && b.isSubsetOf(a);
       }
       return {
         pass,
@@ -328,28 +339,30 @@ export function gradeCandidate(
       }
       let expectedOk = true;
       let schemaOk = true;
+      let diagnostic = '';
       const details: string[] = [];
       if (grader.expected !== undefined) {
         expectedOk = canonicalJson(grader.expected) === canonicalJson(candidate);
         details.push(expectedOk ? 'deep-equals expected' : 'differs from expected');
       }
       if (grader.schema !== undefined) {
-        let validate: ReturnType<Ajv['compile']>;
-        try {
-          validate = ajv.compile(grader.schema);
-        } catch (err) {
-          throw validationError(
-            `json_match grader schema is not a valid JSON Schema (${(err as Error).message}).`,
-            { reason: 'grader_unexecutable', field: 'schema' },
-          );
-        }
+        const {
+          validate,
+          errorsText,
+          diagnostic: schemaDiagnostic,
+        } = compileJsonSchema(grader.schema);
+        diagnostic = schemaDiagnostic;
         schemaOk = validate(candidate) === true;
         details.push(
-          schemaOk ? 'satisfies schema' : `schema violation: ${ajv.errorsText(validate.errors)}`,
+          schemaOk ? 'satisfies schema' : `schema violation: ${errorsText(validate.errors)}`,
         );
       }
       const pass = expectedOk && schemaOk;
-      return { pass, detail: `Candidate ${details.join('; ')}.`, resolved: grader.expected };
+      return {
+        pass,
+        detail: `Candidate ${details.join('; ')}.${diagnostic}`,
+        resolved: grader.expected,
+      };
     }
 
     case 'llm_rubric':
@@ -364,27 +377,22 @@ export function gradeCandidate(
 }
 
 /**
- * Run the cheap self-consistency check: grade gold + every positive (must PASS)
- * and every negative (must REJECT). For `llm_rubric` the deterministic checks
- * are not applicable — `grader_ok` reflects only `verification_present` so the
- * record can still reach submit on recorded verification.
+ * Grade gold and every discrimination case. Rubrics leave deterministic
+ * verdicts unset semantically, represented by the existing false placeholders.
  */
-export function checkSelfConsistency(
+export function gradeDiscrimination(
   grader: Grader,
   gold: unknown,
   positives: unknown[],
   negatives: unknown[],
   choices: string[] | undefined,
-  verificationPresent: boolean,
-): SelfConsistency {
+): Omit<SelfConsistency, 'verification_present' | 'ready_to_submit'> & { goldDetail?: string } {
   if (grader.kind === 'llm_rubric') {
     return {
       gold_passes_grader: false,
       positives_pass: positives.map(() => false),
       negatives_rejected: negatives.map(() => false),
       grader_ok: false,
-      verification_present: verificationPresent,
-      ready_to_submit: verificationPresent,
     };
   }
 
@@ -403,7 +411,6 @@ export function checkSelfConsistency(
     positives_pass: positivesPass,
     negatives_rejected: negativesRejected,
     grader_ok: graderOk,
-    verification_present: verificationPresent,
-    ready_to_submit: graderOk && verificationPresent,
+    goldDetail: goldResult.detail,
   };
 }

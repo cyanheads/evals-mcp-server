@@ -71,6 +71,67 @@ describe('evals_describe_schema', () => {
 });
 
 describe('evals_run_check', () => {
+  it('returns synchronous schema recovery on both surfaces and serves the next call', async () => {
+    const rejected = await runToolContract(runCheckTool, {
+      grader: { kind: 'json_match', schema: { $async: true, type: 'number' } },
+      candidates: ['invalid'],
+    });
+    expect(rejected.isError).toBe(true);
+    expect(rejected.structuredContent).toMatchObject({
+      error: {
+        code: -32007,
+        message: expect.stringContaining('synchronous JSON Schema'),
+        data: {
+          reason: 'grader_unexecutable',
+          field: 'schema',
+          recovery: { hint: expect.any(String) },
+        },
+      },
+    });
+    expect(rejected.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining('synchronous JSON Schema') }),
+    ]);
+    const next = await runToolContract(runCheckTool, {
+      grader: { kind: 'json_match', schema: { type: 'number' } },
+      candidates: [1],
+    });
+    expect(next.isError).toBeFalsy();
+    expect(next.structuredContent).toMatchObject({ pass_count: 1 });
+  });
+
+  it('reports schema diagnostics and unsupported dialect recovery on both surfaces', async () => {
+    const tuple = {
+      type: 'array',
+      prefixItems: [{ type: 'string' }, { type: 'number' }],
+      items: false,
+    };
+    const warning = await runToolContract(runCheckTool, {
+      grader: { kind: 'json_match', schema: tuple },
+      candidates: [['a', 1]],
+    });
+    expect(warning.structuredContent).toMatchObject({
+      results: [{ pass: false, detail: expect.stringContaining('prefixItems') }],
+    });
+    expect(warning.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining('prefixItems') }),
+    ]);
+    const error = await runToolContract(runCheckTool, {
+      grader: {
+        kind: 'json_match',
+        schema: { ...tuple, $schema: 'http://json-schema.org/draft-04/schema#' },
+      },
+      candidates: [['a', 1]],
+    });
+    expect(error.structuredContent).toMatchObject({
+      error: {
+        message: expect.stringContaining('2020-12'),
+        data: { reason: 'grader_unexecutable', recovery: { hint: expect.any(String) } },
+      },
+    });
+    expect(error.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining('2020-12') }),
+    ]);
+  });
   it('renders real numeric scalar rejections and target recovery on both contract surfaces', async () => {
     const result = await runToolContract(runCheckTool, {
       grader: { kind: 'numeric', target: 5 },

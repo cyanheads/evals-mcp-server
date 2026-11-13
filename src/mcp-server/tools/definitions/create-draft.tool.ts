@@ -16,7 +16,6 @@ import {
   buildDraft,
   buildRequiredBeforeSubmit,
   buildSubagentPrompt,
-  hasRecordedVerification,
   REVIEW_PROTOCOL,
   renderDraftReview,
 } from '@/services/eval-record/record-builder.js';
@@ -29,7 +28,7 @@ import {
   TaskTypeSchema,
   VerificationInputSchema,
 } from '@/services/eval-record/schema.js';
-import { checkSelfConsistency } from '@/services/grader/grader-service.js';
+import { checkDraft } from '@/services/eval-record/submit-gate.js';
 import { getRecordStoreService } from '@/services/record-store/record-store-service.js';
 
 export const createDraftTool = tool('evals_create_draft', {
@@ -137,20 +136,12 @@ export const createDraftTool = tool('evals_create_draft', {
     const record = buildDraft(input, cfg.defaultLicense);
 
     // Step 3: cheap self-consistency.
-    const verificationPresent = hasRecordedVerification(record);
-    const checks = checkSelfConsistency(
-      record.grader,
-      record.gold,
-      record.discrimination.positive,
-      record.discrimination.negative,
-      record.choices,
-      verificationPresent,
-    );
+    const { checks, failures } = checkDraft(record);
     await store.writeDraft(record, ctx);
 
     // Step 4: the reflection forcing function.
-    const subagentPrompt = buildSubagentPrompt(record.id);
-    const requiredBeforeSubmit = buildRequiredBeforeSubmit(checks, record);
+    const subagentPrompt = buildSubagentPrompt(record);
+    const requiredBeforeSubmit = buildRequiredBeforeSubmit(failures);
 
     ctx.log.info('Created draft', {
       id: record.id,
@@ -171,14 +162,18 @@ export const createDraftTool = tool('evals_create_draft', {
 
   format: (result) => {
     const sc = result.server_checks.self_consistency;
+    const record = result.normalized_record as EvalRecord;
     const head = [
       `draft_id: ${result.draft_id}  (status: ${result.status})`,
+      ...(record.grader?.kind === 'llm_rubric'
+        ? ['Gold and discrimination: not graded (llm_rubric).']
+        : []),
       `self-consistency: gold_passes_grader=${sc.gold_passes_grader}, grader_ok=${sc.grader_ok}, verification_present=${sc.verification_present}, ready_to_submit=${sc.ready_to_submit}`,
       `positives_pass: [${sc.positives_pass.join(', ')}]  ·  negatives_rejected: [${sc.negatives_rejected.join(', ')}]`,
       '',
     ].join('\n');
     const review = renderDraftReview(
-      result.normalized_record as EvalRecord,
+      record,
       sc,
       result.review_protocol,
       result.suggested_subagent_prompt,

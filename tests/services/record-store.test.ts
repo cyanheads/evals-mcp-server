@@ -58,6 +58,26 @@ describe('RecordStoreService — CRUD and require()', () => {
     expect(read?.id).toBe(rec.id);
   });
 
+  it('preserves validated extension fields through reads, submission, and export scans', async () => {
+    const raw = {
+      ...draftRecord(),
+      extension: { label: 'local annotation' },
+      metadata: { domain: 'math.probability', tags: ['combinatorics'], custom: 'retained' },
+    };
+    await writeFile(join(dir, 'drafts', 'ev_aaaaaaaaaa.json'), JSON.stringify(raw));
+    const read = await store.require('ev_aaaaaaaaaa');
+    expect(read).toEqual(raw);
+    await store.promoteToSubmitted(read, ctx);
+    const scanned = await store.listSubmittedRecords();
+    expect(scanned.records).toEqual([
+      expect.objectContaining({
+        extension: { label: 'local annotation' },
+        metadata: { domain: 'math.probability', tags: ['combinatorics'], custom: 'retained' },
+      }),
+    ]);
+    expect(scanned.skipped).toEqual([]);
+  });
+
   it('read() returns null for a missing id', async () => {
     expect(await store.read('ev_missing000')).toBeNull();
   });
@@ -70,11 +90,76 @@ describe('RecordStoreService — CRUD and require()', () => {
     expect((err as { message: string }).message).toContain('evals_list_records');
   });
 
-  it('parseRecord throws serializationError for on-disk corruption', async () => {
-    await writeFile(join(dir, 'drafts', 'ev_corrupt0000.json'), '{ not json', 'utf8');
-    await expect(store.read('ev_corrupt0000')).rejects.toMatchObject({
-      message: expect.stringContaining('not valid JSON'),
+  it('rejects unsafe record IDs before reading or writing any path', async () => {
+    const marker = join(dir, 'outside.json');
+    await writeFile(marker, JSON.stringify(draftRecord()), 'utf8');
+    await expect(store.require('../outside')).rejects.toMatchObject({
+      data: { reason: 'not_found' },
     });
+    await expect(store.writeDraft(draftRecord({ id: '../outside' }), ctx)).rejects.toMatchObject({
+      data: { reason: 'not_found' },
+    });
+    await expect(store.deleteDraft('../outside', ctx)).rejects.toMatchObject({
+      data: { reason: 'not_found' },
+    });
+    expect(await readFile(marker, 'utf8')).toBe(JSON.stringify(draftRecord()));
+  });
+
+  it.each(['ev_aaaaaaaaa', 'ev_aaaaaaaaaaa'])(
+    'rejects wrong-length record ID %s at every file boundary',
+    async (id) => {
+      const file = join(dir, 'drafts', `${id}.json`);
+      const json = JSON.stringify(draftRecord({ id }));
+      await writeFile(file, json);
+      await expect(store.require(id)).rejects.toMatchObject({ data: { reason: 'not_found', id } });
+      await expect(store.writeDraft(draftRecord({ id }), ctx)).rejects.toMatchObject({
+        data: { reason: 'not_found', id },
+      });
+      await expect(store.deleteDraft(id, ctx)).rejects.toMatchObject({
+        data: { reason: 'not_found', id },
+      });
+      expect(await readFile(file, 'utf8')).toBe(json);
+    },
+  );
+
+  it('diagnoses invalid JSON without forwarding parser snippets', async () => {
+    const id = 'ev_corrupt000';
+    await writeFile(join(dir, 'drafts', `${id}.json`), 'private-marker', 'utf8');
+    await expect(store.require(id)).rejects.toMatchObject({
+      data: { id, reason: 'record_invalid' },
+      message: expect.not.stringContaining('private-marker'),
+    });
+    await store.deleteDraft(id, ctx);
+    expect(await store.read(id)).toBeNull();
+  });
+
+  it('reports an invalid record field and skips only that file during discovery', async () => {
+    const badId = 'ev_corrupt000';
+    const { metadata: _metadata, ...broken } = draftRecord({ id: badId });
+    await writeFile(join(dir, 'drafts', `${badId}.json`), JSON.stringify(broken));
+    await store.writeDraft(draftRecord(), ctx);
+    await expect(store.require(badId)).rejects.toMatchObject({
+      data: { id: badId, reason: 'record_invalid', fields: ['metadata'] },
+    });
+    const result = await store.listSummaries({ limit: 5 });
+    expect(result.summaries.map(({ id }) => id)).toEqual(['ev_aaaaaaaaaa']);
+    expect(result.skipped).toEqual([`drafts/${badId}.json`]);
+  });
+
+  it.each([
+    ['id', { id: 'ev_bbbbbbbbbb' }],
+    ['status', { status: 'submitted' }],
+  ] as const)('rejects a stored %s that disagrees with its file', async (field, override) => {
+    await writeFile(
+      join(dir, 'drafts', 'ev_aaaaaaaaaa.json'),
+      JSON.stringify(draftRecord(override)),
+    );
+    await expect(store.require('ev_aaaaaaaaaa')).rejects.toMatchObject({
+      data: { id: 'ev_aaaaaaaaaa', reason: 'record_invalid', fields: [field] },
+    });
+    const listed = await store.listSummaries({});
+    expect(listed.summaries).toEqual([]);
+    expect(listed.skipped).toEqual(['drafts/ev_aaaaaaaaaa.json']);
   });
 
   it('deleteDraft removes a draft and then reports not_found', async () => {
@@ -100,6 +185,20 @@ describe('RecordStoreService — CRUD and require()', () => {
 
 describe('RecordStoreService — computeContentHash', () => {
   const store = new RecordStoreService('/tmp/unused-hash', undefined);
+
+  it('hashes literal JSON keys inside nested objects and arrays', () => {
+    const first = draftRecord({
+      gold: JSON.parse('{"rows":[{"__proto__":{"value":1},"label":"a"}]}'),
+    });
+    const reordered = draftRecord({
+      gold: JSON.parse('{"rows":[{"label":"a","__proto__":{"value":1}}]}'),
+    });
+    const different = draftRecord({
+      gold: JSON.parse('{"rows":[{"__proto__":{"value":2},"label":"a"}]}'),
+    });
+    expect(store.computeContentHash(first)).toBe(store.computeContentHash(reordered));
+    expect(store.computeContentHash(first)).not.toBe(store.computeContentHash(different));
+  });
 
   it('hashes only the semantic fields — discrimination changes do NOT change the hash', () => {
     const base = draftRecord();
@@ -338,11 +437,16 @@ describe('RecordStoreService — promote + dedup', () => {
     rec.content_hash = store.computeContentHash(rec);
     await store.promoteToSubmitted(rec, ctx);
 
-    expect(await store.findSubmittedDuplicate(rec.content_hash, 'ev_other00000')).toBe(rec.id);
+    expect(await store.findSubmittedDuplicate(rec.content_hash, 'ev_other00000')).toEqual({
+      duplicateId: rec.id,
+      skipped: [],
+    });
     // Excluding the record's own id yields no duplicate.
-    expect(await store.findSubmittedDuplicate(rec.content_hash, rec.id)).toBeNull();
+    expect((await store.findSubmittedDuplicate(rec.content_hash, rec.id)).duplicateId).toBeNull();
     // A different hash is not a duplicate.
-    expect(await store.findSubmittedDuplicate('sha256:nope', 'ev_other00000')).toBeNull();
+    expect(
+      (await store.findSubmittedDuplicate('sha256:nope', 'ev_other00000')).duplicateId,
+    ).toBeNull();
   });
 });
 
@@ -488,9 +592,9 @@ describe('RecordStoreService — fs errors never leak internal paths', () => {
     const store = new RecordStoreService(dir, undefined);
     await store.init();
     // Create a *directory* named like a record file, so readFile hits EISDIR, not ENOENT.
-    await mkdir(join(dir, 'drafts', 'ev_isadir00000.json'), { recursive: true });
+    await mkdir(join(dir, 'drafts', 'ev_isadir0000.json'), { recursive: true });
 
-    const err = await captureRejection(store.read('ev_isadir00000'));
+    const err = await captureRejection(store.read('ev_isadir0000'));
     expect(err.data.reason).toBe('storage_unavailable');
     assertLeakFree(err);
 

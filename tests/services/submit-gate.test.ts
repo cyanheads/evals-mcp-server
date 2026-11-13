@@ -23,7 +23,7 @@ const ctx = createMockContext();
 /** A submit-ready numeric record: gold passes, ≥1 negative rejected, decorrelated verification present. */
 function readyRecord(overrides: Partial<EvalRecord> = {}): EvalRecord {
   const rec = {
-    id: 'ev_ready000000',
+    id: 'ev_ready00000',
     status: 'draft',
     task_type: 'numeric',
     prompt: 'P(both red)?',
@@ -86,6 +86,35 @@ describe('runSubmitGate — deterministic committability', () => {
       store,
     );
     expect(result).toMatchObject({ ok: false, failure: { reason: 'missing_negative_case' } });
+  });
+
+  it('refuses the first failing positive and identifies the candidate', async () => {
+    const result = await runSubmitGate(
+      readyRecord({ discrimination: { positive: ['10/28', '1/2', '2/3'], negative: ['25/64'] } }),
+      store,
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { reason: 'positive_case_failed', data: { index: 1, candidate: '1/2' } },
+    });
+  });
+
+  it('refuses failed verification without a computed value', async () => {
+    const result = await runSubmitGate(
+      readyRecord({
+        verification: {
+          method: 'independent',
+          evidence: [
+            { type: 'deterministic_check', tool: 'calculator', claim: 'gold', passed: false },
+          ],
+        },
+      }),
+      store,
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { reason: 'verification_disagrees_with_gold', data: { index: 0 } },
+    });
   });
 
   it('refuses negative_case_passed when a negative passes the grader (and names the offender)', async () => {
@@ -207,7 +236,7 @@ describe('runSubmitGate — llm_rubric', () => {
 
   function rubricRecord(overrides: Partial<EvalRecord> = {}): EvalRecord {
     return readyRecord({
-      id: 'ev_rubric00000',
+      id: 'ev_rubric0000',
       task_type: 'free_response',
       gold: 'A model answer.',
       grader: {
@@ -219,6 +248,30 @@ describe('runSubmitGate — llm_rubric', () => {
       ...overrides,
     });
   }
+
+  it('honors explicitly failed verification without grading the rubric', async () => {
+    const result = await runSubmitGate(
+      rubricRecord({
+        verification: {
+          method: 'independent',
+          evidence: [
+            {
+              type: 'deterministic_check',
+              tool: 'verifier',
+              claim: 'gold',
+              computed: 'ok',
+              passed: false,
+            },
+          ],
+        },
+      }),
+      store,
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { reason: 'verification_disagrees_with_gold' },
+    });
+  });
 
   it('admits on recorded verification alone with server_verified=false and gold SKIPPED', async () => {
     const rec = rubricRecord();
