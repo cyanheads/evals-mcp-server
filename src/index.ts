@@ -26,7 +26,8 @@ await createApp({
   name: 'evals-mcp-server',
   title: 'evals-mcp-server',
   instructions:
-    'Author verifiable eval records through the draft → review → revise → submit loop. Call evals_describe_schema for a task type, then evals_create_draft; the response parrots the record back with a review protocol and a ready subagent prompt. Spawn a fresh subagent (connected here) to verify the gold via evals_get_record + evals_run_check, then apply surgical fixes with evals_revise_draft and finalize with evals_submit_draft. The submit gate requires the gold to pass its own grader, ≥1 negative case to be rejected, and a recorded, decorrelated independent verification.',
+    'Call evals_describe_schema before evals_create_draft. Use the returned draft_id to read, revise, and submit the same record. Verify the gold by a different method from the one that produced it and record the evidence with evals_revise_draft before calling evals_submit_draft. Submit requires at least one negative case. A deterministic grader must pass the gold and every positive and reject every negative. Rubric scoring happens outside this server.',
+  skills: 'skills',
   tools: [
     describeSchemaTool,
     createDraftTool,

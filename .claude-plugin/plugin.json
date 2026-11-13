@@ -12,13 +12,46 @@
   "repository": "https://github.com/cyanheads/evals-mcp-server",
   "license": "Apache-2.0",
   "keywords": ["mcp", "mcp-server", "model-context-protocol", "evals", "evaluation", "grader", "rlvr"],
+  "userConfig": {
+    "evals_data_dir": {
+      "type": "directory",
+      "title": "Data directory",
+      "description": "Root folder for record JSON. The store manages drafts/, submitted/, and exports/ subdirs under it.",
+      "required": false,
+      "default": "./evals-data"
+    },
+    "evals_require_confirmation": {
+      "type": "string",
+      "title": "Require submit confirmation",
+      "description": "When 'true', evals_submit_draft requests human confirmation before finalizing.",
+      "required": false,
+      "default": "false"
+    },
+    "evals_default_license": {
+      "type": "string",
+      "title": "Default record license",
+      "description": "Default metadata.license applied when a draft omits one (e.g. CC-BY-4.0).",
+      "required": false,
+      "default": ""
+    },
+    "evals_capture_dir": {
+      "type": "directory",
+      "title": "Capture directory",
+      "description": "Directory of tool-call capture files; referenced EvalsIDs resolve to full dumps at submit.",
+      "required": false,
+      "default": ""
+    }
+  },
   "mcpServers": {
     "evals-mcp-server": {
       "command": "npx",
       "args": ["-y", "@cyanheads/evals-mcp-server"],
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
-        "EVALS_DATA_DIR": "${EVALS_DATA_DIR}"
+        "EVALS_DATA_DIR": "${user_config.evals_data_dir}",
+        "EVALS_REQUIRE_CONFIRMATION": "${user_config.evals_require_confirmation}",
+        "EVALS_DEFAULT_LICENSE": "${user_config.evals_default_license}",
+        "EVALS_CAPTURE_DIR": "${user_config.evals_capture_dir}"
       }
     }
   }

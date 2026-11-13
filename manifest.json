@@ -58,7 +58,7 @@
     "evals_capture_dir": {
       "type": "directory",
       "title": "Capture directory",
-      "description": "Directory of framework-written tool-call captures; when set, captures EvalsIDs resolve to full dumps.",
+      "description": "Directory of tool-call capture files; referenced EvalsIDs resolve to full dumps at submit.",
       "required": false,
       "default": ""
     }

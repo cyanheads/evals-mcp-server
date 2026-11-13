@@ -3,8 +3,13 @@
     "command": "npx",
     "args": ["-y", "@cyanheads/evals-mcp-server"],
     "env": {
-      "MCP_TRANSPORT_TYPE": "stdio",
-      "EVALS_DATA_DIR": "${EVALS_DATA_DIR}"
-    }
+      "MCP_TRANSPORT_TYPE": "stdio"
+    },
+    "env_vars": [
+      "EVALS_DATA_DIR",
+      "EVALS_REQUIRE_CONFIRMATION",
+      "EVALS_DEFAULT_LICENSE",
+      "EVALS_CAPTURE_DIR"
+    ]
   }
 }
