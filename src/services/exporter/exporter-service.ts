@@ -2,9 +2,8 @@
  * @fileoverview The exporter service — compiles submitted eval records to a
  * downstream format: jsonl (lossless, one record per line), csv (flattened,
  * lossy summary), inspect (UK AISI Inspect AI task/sample), and lm-eval
- * (EleutherAI lm-evaluation-harness manifest). Maps the grader DSL to each
- * harness's scoring primitive where one exists, else emits the grader spec
- * inline so nothing is silently dropped.
+ * (EleutherAI lm-evaluation-harness data manifest). Scoring hints suggest
+ * downstream adapters; grader_spec retains the actual grading contract.
  * @module services/exporter/exporter-service
  */
 
@@ -31,31 +30,40 @@ function csvCell(value: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** Map the grader DSL to Inspect AI's scorer name, with the spec carried inline. */
-function inspectScorer(grader: Grader): { scorer: string; spec: Grader } {
-  const scorer =
-    grader.kind === 'numeric'
-      ? 'match_numeric'
-      : grader.kind === 'exact_match'
-        ? 'match'
-        : grader.kind === 'mcq'
-          ? 'choice'
-          : grader.kind === 'regex'
-            ? 'pattern'
-            : grader.kind === 'set_match'
-              ? 'includes'
-              : grader.kind === 'json_match'
-                ? 'json'
-                : 'model_graded_qa'; // llm_rubric
-  return { scorer, spec: grader };
+/** Suggest a real Inspect scorer where one fits; options do not replace grader_spec. */
+function inspectScorer(grader: Grader) {
+  switch (grader.kind) {
+    case 'numeric':
+      return { scorer: 'match', scorer_args: { numeric: true } };
+    case 'exact_match':
+      return {
+        scorer: 'match',
+        scorer_args: {
+          location: 'exact',
+          ignore_case: grader.normalize?.includes('lowercase') ?? false,
+        },
+      };
+    case 'mcq':
+      return { scorer: 'choice' };
+    case 'regex':
+      return {
+        scorer: 'pattern',
+        scorer_args: { pattern: grader.pattern, ignore_case: grader.flags?.includes('i') ?? false },
+      };
+    case 'llm_rubric':
+      return { scorer: 'model_graded_qa' };
+    case 'set_match':
+    case 'json_match':
+      return {};
+  }
 }
 
-/** Map the grader DSL to lm-eval's output_type/metric, with the spec carried inline. */
-function lmEvalMetric(grader: Grader): { output_type: string; metric: string; spec: Grader } {
-  if (grader.kind === 'mcq') return { output_type: 'multiple_choice', metric: 'acc', spec: grader };
-  if (grader.kind === 'llm_rubric')
-    return { output_type: 'generate_until', metric: 'llm_judge', spec: grader };
-  return { output_type: 'generate_until', metric: 'exact_match', spec: grader };
+/** Suggest lm-eval's output type and a compatible built-in metric, if available. */
+function lmEvalMetric(grader: Grader) {
+  if (grader.kind === 'mcq') return { output_type: 'multiple_choice', metric: 'acc' };
+  if (grader.kind === 'exact_match')
+    return { output_type: 'generate_until', metric: 'exact_match' };
+  return { output_type: 'generate_until' };
 }
 
 export class ExporterService {
@@ -98,35 +106,40 @@ export class ExporterService {
 
   private toInspect(records: EvalRecord[]): string {
     const samples = records.map((r) => {
-      const { scorer, spec } = inspectScorer(r.grader);
+      const choiceIndex =
+        r.grader.kind === 'mcq' ? r.choices?.indexOf(r.grader.correct) : undefined;
+      const target =
+        choiceIndex !== undefined && choiceIndex >= 0
+          ? choiceIndex < 26
+            ? String.fromCharCode(65 + choiceIndex)
+            : String(choiceIndex - 25)
+          : typeof r.gold === 'string'
+            ? r.gold
+            : JSON.stringify(r.gold);
       return {
         id: r.id,
-        input: r.prompt,
-        target: r.gold,
-        ...(r.context ? { context: r.context } : {}),
+        input: r.context ? `${r.context}\n\n${r.prompt}` : r.prompt,
+        target,
         ...(r.choices ? { choices: r.choices } : {}),
-        scorer,
-        grader_spec: spec,
+        ...(r.grader.kind === 'mcq' && choiceIndex === undefined ? {} : inspectScorer(r.grader)),
+        grader_spec: r.grader,
         metadata: { domain: r.metadata.domain, tags: r.metadata.tags, task_type: r.task_type },
       };
     });
-    return `${JSON.stringify({ version: 1, format: 'inspect', samples }, null, 2)}\n`;
+    return `${JSON.stringify(samples, null, 2)}\n`;
   }
 
   private toLmEval(records: EvalRecord[]): string {
-    const docs = records.map((r) => {
-      const { output_type, metric, spec } = lmEvalMetric(r.grader);
-      return {
-        doc_id: r.id,
-        query: r.prompt,
-        gold: r.gold,
-        ...(r.choices ? { choices: r.choices } : {}),
-        output_type,
-        metric,
-        grader_spec: spec,
-        metadata: { domain: r.metadata.domain, tags: r.metadata.tags, task_type: r.task_type },
-      };
-    });
+    const docs = records.map((r) => ({
+      doc_id: r.id,
+      query: r.prompt,
+      gold: r.gold,
+      ...(r.context !== undefined ? { context: r.context } : {}),
+      ...(r.choices ? { choices: r.choices } : {}),
+      ...lmEvalMetric(r.grader),
+      grader_spec: r.grader,
+      metadata: { domain: r.metadata.domain, tags: r.metadata.tags, task_type: r.task_type },
+    }));
     return `${JSON.stringify({ version: 1, format: 'lm-eval', docs }, null, 2)}\n`;
   }
 }
