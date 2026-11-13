@@ -1,6 +1,6 @@
 # evals-mcp-server - Directory Structure
 
-Generated on: 2026-11-13 16:21:54
+Generated on: 2026-11-13 16:47:45
 
 ```text
 evals-mcp-server/
@@ -25,6 +25,7 @@ evals-mcp-server/
 │   └── settings.json
 ├── changelog/
 │   ├── 0.1.x/
+│   ├── 0.2.x/
 │   └── template.md
 ├── docs/
 │   ├── authoring-loop-pattern.md

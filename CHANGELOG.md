@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.0](changelog/0.2.x/0.2.0.md) — 2026-11-13 · ⚠️ Breaking · 🛡️ Security
+
+Verify drafts before submission and export records for Inspect AI and lm-evaluation-harness.
+
 ## [0.1.6](changelog/0.1.x/0.1.6.md) — 2026-10-13
 
 Validate drafts before persistence and grade only finite real scalars.
